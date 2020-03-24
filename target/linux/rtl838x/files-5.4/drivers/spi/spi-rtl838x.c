@@ -14,7 +14,7 @@
 
 #define DRIVER_NAME			"spi-rtl838x"
 
-//#define RTL838X_SPIF_REGISTER_BASE		0xB8001200
+#define RTL838X_SPIF_REGISTER_BASE		0xB8001200
 /* SFCR - SPI Flash Configuration Register */
 #define RTL838X_SPIF_CONFIG_REG			0x0
 #define   RTL838X_SFCR_SPI_CLK_DIV		  29
@@ -83,13 +83,13 @@ static inline struct rtl838x_spi *spidev_to_rtl838x_spi(struct spi_device *spi)
 
 static inline u32 rtl838x_reg_read(struct rtl838x_spi *rs, u32 reg)
 {
-	return __raw_readl(rs->base + reg);
+	return __raw_readl(RTL838X_SPIF_REGISTER_BASE + reg);
 //	return ioread32(rs->base + reg);
 }
 
 static inline void rtl838x_reg_write(struct rtl838x_spi *rs, u32 reg, u32 val)
 {
-	__raw_writel(val, rs->base + reg);
+	__raw_writel(val, RTL838X_SPIF_REGISTER_BASE + reg);
 //	iowrite32(val, rs->base + reg);
 }
 
