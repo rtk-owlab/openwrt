@@ -241,7 +241,9 @@ static int rtl838x_spi_transfer_one_message(struct spi_controller *master,
 	int status = 0;
 
 	dev_info(&spi->dev, "## rtl838x_spi_transfer_one_message\n");
-	rtl838x_spi_wait_till_ready(rs);
+	status = rtl838x_spi_wait_till_ready(rs);
+	if (status)
+		goto msg_done;
 
 	list_for_each_entry(t, &m->transfers, transfer_list)
 		if (t->speed_hz < speed)
