@@ -203,6 +203,7 @@ static void rtl838x_spi_read(struct rtl838x_spi *rs, int rx_len, u8 *buf)
 	while (rx_len>=4) {
 		rtl838x_spi_wait_till_ready(rs);
 		*((u32*) buf) = rtl838x_reg_read(rs, RTL838X_SPIF_DATA_REG);
+		printk(KERN_INFO "read32: %x", *((u32*) buf));
 		buf+=4;
 		rx_len-=4;
 	}
@@ -213,8 +214,8 @@ static void rtl838x_spi_read(struct rtl838x_spi *rs, int rx_len, u8 *buf)
 	/* read each 1-byte to buf (rest 1-3 bytes) */
 	while (rx_len > 0) {
 		rtl838x_spi_wait_till_ready(rs);
-		*(buf) = rtl838x_reg_read(rs, RTL838X_SPIF_DATA_REG)
-			>> (sizeof(u8) * 3);
+		*(buf) = rtl838x_reg_read(rs, RTL838X_SPIF_DATA_REG) >> 24;
+		printk(KERN_INFO "read8: %x", *buf);
 		buf++;
 		rx_len--;
 	}
@@ -234,6 +235,7 @@ static void rtl838x_spi_write(struct rtl838x_spi *rs, int tx_len, u8 *buf)
 			| (SPI_RW_LEN4 << RTL838X_SFCSR_SPI_LEN));
 	/* write each 4-byte to DATA reg */
 	while (tx_len >= 4) {
+		printk(KERN_INFO "write32: %x", *((u32*) buf));
 		rtl838x_spi_wait_till_ready(rs);
 		rtl838x_reg_write(rs, RTL838X_SPIF_DATA_REG, *((u32*) buf));
 		buf+=4;
@@ -245,9 +247,10 @@ static void rtl838x_spi_write(struct rtl838x_spi *rs, int tx_len, u8 *buf)
 	rtl838x_reg_write(rs, RTL838X_SPIF_CONTROL_STAT_REG, sfcsr);
 	/* write each 1-byte to DATA reg (rest 1-3 bytes) */
 	while (tx_len > 0) {
+		printk(KERN_INFO "write8: %x", ((u32*) buf));
 		rtl838x_spi_wait_till_ready(rs);
 		rtl838x_reg_write(rs, RTL838X_SPIF_DATA_REG,
-				((u32) *buf) << (sizeof(u8) * 3));
+				((u32) *buf) << 24);
 		buf++;
 		tx_len--;
 	}
