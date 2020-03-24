@@ -91,6 +91,26 @@ static inline void rtl838x_reg_write(struct rtl838x_spi *rs, u32 reg, u32 val)
 	iowrite32(val, rs->base + reg);
 }
 
+static void rtl838x_dump_spi_regs(struct rtl838x_spi *rs)
+{
+	u32 reg;
+
+	reg = rtl838x_reg_read(rs, RTL838X_SPIF_CONFIG_REG);
+	printk(KERN_INFO "# rtl838x regs: SFCR -> %x, ", reg);
+
+	reg = rtl838x_reg_read(rs, RTL838X_SPIF_CONFIG_REG2);
+	printk(KERN_INFO "SFCR2 -> %x, ", reg);
+
+	reg = rtl838x_reg_read(rs, RTL838X_SPIF_CONTROL_STAT_REG);
+	printk(KERN_INFO "SFCSR -> %x, ", reg);
+#if 0
+	reg = rtl838x_reg_read(rs, RTL838X_SPIF_DATA_REG);
+	printk(KERN_INFO "SFDR -> %x, ", reg);
+
+	reg = rtl838x_reg_read(rs, RTL838X_SPIF_DATA_REG2);
+	printk(KERN_INFO "SFDR2 -> %x\n", reg);
+#endif
+}
 static inline int rtl838x_spi_wait_till_ready(struct rtl838x_spi *rs)
 {
 	int i;
@@ -240,6 +260,7 @@ static int rtl838x_spi_transfer_one_message(struct spi_controller *master,
 	struct spi_transfer *t = NULL;
 	int status = 0;
 
+	rtl838x_dump_spi_regs(rs);
 	dev_info(&spi->dev, "## rtl838x_spi_transfer_one_message\n");
 	status = rtl838x_spi_wait_till_ready(rs);
 	if (status)
@@ -363,6 +384,7 @@ static int rtl838x_spi_probe(struct platform_device *pdev)
 //	rs->dram_freq = clk_get_rate(rs->clk);
 	dev_info(&pdev->dev, "dram_freq: %u\n", rs->dram_freq);
 
+	rtl838x_dump_spi_regs(rs);
 	/*
 	 * set to serial I/O
 	 * (U-Boot configure to dual I/O or quad I/O by default if that I/O is
