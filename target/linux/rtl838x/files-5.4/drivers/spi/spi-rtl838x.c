@@ -83,12 +83,14 @@ static inline struct rtl838x_spi *spidev_to_rtl838x_spi(struct spi_device *spi)
 
 static inline u32 rtl838x_reg_read(struct rtl838x_spi *rs, u32 reg)
 {
-	return ioread32(rs->base + reg);
+	return __raw_readl(rs->base + reg);
+//	return ioread32(rs->base + reg);
 }
 
 static inline void rtl838x_reg_write(struct rtl838x_spi *rs, u32 reg, u32 val)
 {
-	iowrite32(val, rs->base + reg);
+	__raw_writel(val, rs->base + reg);
+//	iowrite32(val, rs->base + reg);
 }
 
 static void rtl838x_dump_spi_regs(struct rtl838x_spi *rs)
