@@ -394,7 +394,7 @@ static int rtl838x_spi_probe(struct platform_device *pdev)
 	 * below is a part of spi_enter_sio, is it OK?
 	 */
 	/* CMDIO=0, ADDRIO=0, DUMMYCYCLE=0?, DATAIO=0 */
-#if 0
+
 	dev_info(&pdev->dev, "SFCR2 configuration in probe\n");
 	tmp = rtl838x_reg_read(rs, RTL838X_SPIF_CONFIG_REG2);
 	sfcr2 = tmp & RTL838X_SFCR2_SFSIZE_MASK;
@@ -405,7 +405,7 @@ static int rtl838x_spi_probe(struct platform_device *pdev)
 	rtl838x_reg_write(rs, RTL838X_SPIF_CONFIG_REG2, sfcr2);
 	rtl838x_spi_wait_till_ready(rs);
 	dev_info(&pdev->dev, "SFCR2 configuration done\n");
-#endif
+
 	return devm_spi_register_controller(&pdev->dev, master);
 }
 
