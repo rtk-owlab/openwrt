@@ -99,8 +99,10 @@ static inline int rtl838x_spi_wait_till_ready(struct rtl838x_spi *rs)
 		u32 status;
 
 		status = rtl838x_reg_read(rs, RTL838X_SPIF_CONTROL_STAT_REG);
-		if ((status & RTL838X_SFCSR_SPI_RDY) != 0)
+		if ((status & RTL838X_SFCSR_SPI_RDY) != 0) {
+			printk(KERN_INFO "exit waiting loop in rtl838x_spi_wait_till_ready\n");
 			return 0;
+		}
 		cpu_relax();
 		udelay(1);
 	}
@@ -113,6 +115,7 @@ static void rtl838x_spi_set_cs(struct spi_device *spi, int enable)
 	struct rtl838x_spi *rs = spidev_to_rtl838x_spi(spi);
 	int cs = spi->chip_select;
 
+	dev_info(&spi->dev, "## rtl838x_spi_set_cs\n");
 	/* needed for MMU constraints */
 	rtl838x_reg_write(rs, RTL838X_SPIF_CONTROL_STAT_REG
 		, RTL838X_SFCSR_SPI_CSB0 | RTL838X_SFCSR_SPI_CSB1);
@@ -130,6 +133,7 @@ static void rtl838x_spi_set_cs(struct spi_device *spi, int enable)
 		? RTL838X_SFCSR_SPI_CSB1				/* set CSB1 to HIGH if cs=0 */
 		: RTL838X_SFCSR_SPI_CSB0 | RTL838X_SFCSR_CHIP_SEL);	/* set CSB0 to HIGH if cs=1 */
 	rtl838x_spi_wait_till_ready(rs);
+	dev_info(&spi->dev, "## exit rtl838x_spi_set_cs\n");
 }
 
 static int rtl838x_spi_prepare(struct spi_device *spi, unsigned int speed)
@@ -138,6 +142,7 @@ static int rtl838x_spi_prepare(struct spi_device *spi, unsigned int speed)
 	u32 rate;
 	u32 reg;
 
+	dev_info(&spi->dev, "## rtl838x_spi_prepare\n");
 	dev_dbg(&spi->dev, "speed: %u\n", speed);
 
 	rate = DIV_ROUND_UP(rs->dram_freq, speed);
@@ -156,6 +161,7 @@ static int rtl838x_spi_prepare(struct spi_device *spi, unsigned int speed)
 
 	rtl838x_reg_write(rs, RTL838X_SPIF_CONFIG_REG, reg);
 
+	dev_info(&spi->dev, "## exit rtl838x_spi_prepare\n");
 	return 0;
 }
 
@@ -234,6 +240,7 @@ static int rtl838x_spi_transfer_one_message(struct spi_controller *master,
 	struct spi_transfer *t = NULL;
 	int status = 0;
 
+	dev_info(&spi->dev, "## rtl838x_spi_transfer_one_message\n");
 	rtl838x_spi_wait_till_ready(rs);
 
 	list_for_each_entry(t, &m->transfers, transfer_list)
@@ -268,6 +275,7 @@ msg_done:
 	m->status = status;
 	spi_finalize_current_message(master);
 
+	dev_info(&spi->dev, "## exit rtl838x_spi_transfer_one_message: %d\n", status);
 	return 0;
 }
 
@@ -275,6 +283,7 @@ static int rtl838x_spi_setup(struct spi_device *spi)
 {
 	struct rtl838x_spi *rs = spidev_to_rtl838x_spi(spi);
 
+	dev_info(&spi->dev, "## rtl838x_spi_setup\n");
 	dev_dbg(&spi->dev, "setup: requested max_speed %u\n",
 		spi->max_speed_hz);
 	/* The RTL838x SPI controller seems to like the same as the RTL819x
@@ -302,6 +311,7 @@ static int rtl838x_spi_setup(struct spi_device *spi)
 		return -EINVAL;
 	}
 
+	dev_info(&spi->dev, "## exit rtl838x_spi_setup\n");
 	return 0;
 }
 
@@ -367,6 +377,7 @@ static int rtl838x_spi_probe(struct platform_device *pdev)
 	rtl838x_spi_wait_till_ready(rs);
 	rtl838x_reg_write(rs, RTL838X_SPIF_CONFIG_REG2, sfcr2);
 	rtl838x_spi_wait_till_ready(rs);
+	dev_info(&pdev->dev, "SFCR2 configuration done\n");
 
 	return devm_spi_register_controller(&pdev->dev, master);
 }
