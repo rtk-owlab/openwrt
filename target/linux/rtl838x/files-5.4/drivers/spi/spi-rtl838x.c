@@ -89,6 +89,7 @@ static inline u32 rtl838x_reg_read(struct rtl838x_spi *rs, u32 reg)
 
 static inline void rtl838x_reg_write(struct rtl838x_spi *rs, u32 reg, u32 val)
 {
+	printk(KERN_INFO "reg w: %x <- %x", reg, val);
 	__raw_writel(val, RTL838X_SPIF_REGISTER_BASE + reg);
 //	iowrite32(val, rs->base + reg);
 }
