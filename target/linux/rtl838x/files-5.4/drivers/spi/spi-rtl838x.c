@@ -83,13 +83,16 @@ static inline struct rtl838x_spi *spidev_to_rtl838x_spi(struct spi_device *spi)
 
 static inline u32 rtl838x_reg_read(struct rtl838x_spi *rs, u32 reg)
 {
-	return __raw_readl(RTL838X_SPIF_REGISTER_BASE + reg);
+	u32 val;
+	val = __raw_readl(RTL838X_SPIF_REGISTER_BASE + reg);
+	printk(KERN_INFO "reg r: %x -> %x", RTL838X_SPIF_REGISTER_BASE + reg, val);
+	return val;
 //	return ioread32(rs->base + reg);
 }
 
 static inline void rtl838x_reg_write(struct rtl838x_spi *rs, u32 reg, u32 val)
 {
-	printk(KERN_INFO "reg w: %x <- %x", reg, val);
+	printk(KERN_INFO "reg w: %x <- %x", RTL838X_SPIF_REGISTER_BASE + reg, val);
 	__raw_writel(val, RTL838X_SPIF_REGISTER_BASE + reg);
 //	iowrite32(val, rs->base + reg);
 }
@@ -99,13 +102,13 @@ static void rtl838x_dump_spi_regs(struct rtl838x_spi *rs)
 	u32 reg;
 
 	reg = rtl838x_reg_read(rs, RTL838X_SPIF_CONFIG_REG);
-	printk(KERN_INFO "# rtl838x regs: SFCR -> %x, ", reg);
+	printk(KERN_INFO "# rtl838x regs:\n  SFCR -> %x, ", reg);
 
 	reg = rtl838x_reg_read(rs, RTL838X_SPIF_CONFIG_REG2);
-	printk(KERN_INFO "SFCR2 -> %x, ", reg);
+	printk(KERN_INFO "  SFCR2 -> %x, ", reg);
 
 	reg = rtl838x_reg_read(rs, RTL838X_SPIF_CONTROL_STAT_REG);
-	printk(KERN_INFO "SFCSR -> %x, ", reg);
+	printk(KERN_INFO "  SFCSR -> %x, ", reg);
 #if 0
 	reg = rtl838x_reg_read(rs, RTL838X_SPIF_DATA_REG);
 	printk(KERN_INFO "SFDR -> %x, ", reg);
