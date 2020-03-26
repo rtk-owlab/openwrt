@@ -195,6 +195,7 @@ static void rtl838x_spi_read(struct rtl838x_spi *rs, int rx_len, u8 *buf)
 {
 	u32 sfcsr;
 
+	printk(KERN_INFO "# spi_read, rx_len: %d", rx_len);
 	sfcsr = rtl838x_reg_read(rs, RTL838X_SPIF_CONTROL_STAT_REG);
 	/* set 0 to LEN bits */
 	sfcsr &= ~RTL838X_SFCSR_SPI_LEN_MASK;
@@ -229,6 +230,7 @@ static void rtl838x_spi_write(struct rtl838x_spi *rs, int tx_len, u8 *buf)
 {
 	u32 sfcsr;
 
+	printk(KERN_INFO "# spi_write, tx_len: %d", tx_len);
 	sfcsr = rtl838x_reg_read(rs, RTL838X_SPIF_CONTROL_STAT_REG);
 	/* set 0 to LEN bits */
 	sfcsr &= ~RTL838X_SFCSR_SPI_LEN_MASK;
