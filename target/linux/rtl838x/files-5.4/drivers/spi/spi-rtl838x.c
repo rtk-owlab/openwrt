@@ -251,7 +251,7 @@ static void rtl838x_spi_write(struct rtl838x_spi *rs, int tx_len, u8 *buf)
 	rtl838x_reg_write(rs, RTL838X_SPIF_CONTROL_STAT_REG, sfcsr);
 	/* write each 1-byte to DATA reg (rest 1-3 bytes) */
 	while (tx_len > 0) {
-		printk(KERN_INFO "write8: %x", ((u32*) buf));
+		printk(KERN_INFO "write8: %x", *buf);
 		rtl838x_spi_wait_till_ready(rs);
 		rtl838x_reg_write(rs, RTL838X_SPIF_DATA_REG,
 				((u32) *buf) << 24);
