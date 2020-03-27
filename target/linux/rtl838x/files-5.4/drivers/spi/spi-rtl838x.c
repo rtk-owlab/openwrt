@@ -237,6 +237,7 @@ static void rtl838x_spi_read(struct rtl838x_spi *rs, int rx_len, u8 *buf)
 	printk(KERN_INFO "# spi_read, rx_len: %d", rx_len);
 
 	/* send dummy data (dummy len = rx_len) */
+	printk(KERN_INFO "send dummy data before reading data");
 	rtl838x_spi_wait_till_ready(rs);
 	rtl838x_spi_write(rs, rx_len, NULL);
 
