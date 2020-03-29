@@ -709,14 +709,6 @@ void print_matrix(void)
 
 static int rtl838x_get_port_bit(int port)
 {
-/*	if (port == 9 )
-		return 28;
-	if (port == 10)
-		return 29;
-	
-	if (port < 0 || port >8)
-		return -1;
-	return 8 + port;*/
 	if (port == 28 )
 		return 28;
 	if (port == 26)
@@ -844,7 +836,7 @@ void rtl838x_fixed_link_update(struct dsa_switch *ds, int port,
 	} 
 	if (port == 26)
 		offset = 0x100;
-	
+
 	reg = sw_r32(MAPLE_SDS4_FIB_REG0r + offset);
 	
 	if ( (reg & (1 << 13)) && (!(reg & (1 << 6))) )
@@ -856,7 +848,7 @@ void rtl838x_fixed_link_update(struct dsa_switch *ds, int port,
 		st->duplex = DUPLEX_FULL;
 	else
 		st->duplex = DUPLEX_HALF;
-	
+
 	// LINK
 	
 }
@@ -895,44 +887,112 @@ void rtl838x_adjust_link(struct dsa_switch *ds, int port,
 	sw_w32(reg, MAPLE_SDS4_FIB_REG0r + offset);
 
 	rtl8380_sds_rst(port);
-
-	return;
 }
 
-static int rtl838x_vlan_tables_read(u32 vlan, struct rtl838x_vlan_info *info)
+
+static void rtl838x_port_stp_state_get(u32 msti, u32 *state)
+{
+	u32 cmd = 1 << 15 /* Execute cmd */
+		| 1 << 14 /* Read */
+		| 2 << 12 /* Table type 0b10 */
+		| (msti & 0xfff);
+	sw_w32(cmd, RTL838X_TBL_ACCESS_CTRL_0);
+	do { }  while (sw_r32(RTL838X_TBL_ACCESS_CTRL_0) & (1 << 15));
+	state[0] = sw_r32(RTL838X_TBL_ACCESS_DATA_0(0));
+	state[1] = sw_r32(RTL838X_TBL_ACCESS_DATA_0(1));
+/*	printk("STP port state %x %x\n", state[0], state[1]);*/
+}
+
+static void rtl838x_port_stp_state_set(struct dsa_switch *ds, int port,
+				       u8 state)
+{
+	u32 cmd, msti = 0;
+	u32 port_state[2];
+	int index, bit;
+	struct rtl838x_priv *priv = ds->priv;
+/*	printk("rtl838x_port_stp_state_set, port %d state %2x\n", port, state); */
+	mutex_lock(&priv->reg_mutex);
+
+	index = port >= 16? 0: 1;
+	bit = (port << 1) % 32;
+
+	rtl838x_port_stp_state_get(msti, &port_state[0]);
+
+	port_state[index] &= ~(3 << bit);
+
+	switch (state) {
+	case BR_STATE_DISABLED:
+		port_state[index] |= (0 << bit);
+		break;
+	case BR_STATE_BLOCKING:
+		port_state[index] |= (1 << bit);
+		break;
+	case BR_STATE_LISTENING:
+		break;
+	case BR_STATE_LEARNING:
+		port_state[index] |= (2 << bit);
+		break;
+	case BR_STATE_FORWARDING:
+		port_state[index] |= (3 << bit);
+	default:
+		break;
+	}
+
+	cmd = 1 << 15 /* Execute cmd */
+		| 0 << 14 /* Write */
+		| 2 << 12 /* Table type 0b10 */
+		| (msti & 0xfff);
+	sw_w32(port_state[0], RTL838X_TBL_ACCESS_DATA_0(0));
+	sw_w32(port_state[1], RTL838X_TBL_ACCESS_DATA_0(1));
+	sw_w32(cmd, RTL838X_TBL_ACCESS_CTRL_0);
+	do { }  while (sw_r32(RTL838X_TBL_ACCESS_CTRL_0) & (1 << 15));
+
+	mutex_unlock(&priv->reg_mutex);
+}
+
+static void rtl838x_vlan_tables_read(u32 vlan, struct rtl838x_vlan_info *info)
 {
 	u32 cmd;
 
-	cmd = 1 << 15 /* Execute cmd */ 
+	cmd = 1 << 15 /* Execute cmd */
 		| 1 << 14 /* Read */
 		| 0 << 12 /* Table type 0b00 */
 		| (vlan & 0xfff);
-
-	printk("Executing command %x", cmd);
-	sw_w32(cmd, RTL8380_TBL_ACCESS_CTRL_0);
-
-	do { }  while (sw_r32(RTL8380_TBL_ACCESS_CTRL_0) & (1 << 15));
+	sw_w32(cmd, RTL838X_TBL_ACCESS_CTRL_0);
+	do { }  while (sw_r32(RTL838X_TBL_ACCESS_CTRL_0) & (1 << 15));
+	info->tagged_ports = sw_r32(RTL838X_TBL_ACCESS_DATA_0(0));
+	info->vlan_conf = sw_r32(RTL838X_TBL_ACCESS_DATA_0(1));
 	
-	printk("Execution completed");
-  
-	info->tagged_ports = sw_r32(RTL8380_TBL_ACCESS_DATA_0(0));
-	info->vlan_conf = sw_r32(RTL8380_TBL_ACCESS_DATA_0(1));
-	
-	
-	cmd = 1 << 15 /* Execute cmd */ 
+	cmd = 1 << 15 /* Execute cmd */
 		| 1 << 14 /* Read */
 		| 0 << 12 /* Table type 0b00 */
 		| (vlan & 0xfff);
+	sw_w32(cmd, RTL838X_TBL_ACCESS_CTRL_1);
+	do { } while (sw_r32(RTL838X_TBL_ACCESS_CTRL_1) & (1 << 15));
+	info->untagged_ports = sw_r32(RTL838X_TBL_ACCESS_DATA_0(0));
+}
 
-	printk("Executing command %x", cmd);
-	sw_w32(cmd, RTL8380_TBL_ACCESS_CTRL_1);
+static void rtl838x_vlan_set_tagged(u32 vlan, u32 portmask, u32 conf)
+{
+	u32 cmd = 1 << 15 /* Execute cmd */
+		| 0 << 14 /* Write */
+		| 0 << 12 /* Table type 0b00 */
+		| (vlan & 0xfff);
+	sw_w32(portmask, RTL838X_TBL_ACCESS_DATA_0(0));
+	sw_w32(conf, RTL838X_TBL_ACCESS_DATA_0(1));
+	sw_w32(cmd, RTL838X_TBL_ACCESS_CTRL_0);
+	do { }  while (sw_r32(RTL838X_TBL_ACCESS_CTRL_0) & (1 << 15));
+}
 
-	do { }  while (sw_r32(RTL8380_TBL_ACCESS_CTRL_1) & (1 << 15));
-	
-	printk("Execution completed");
-	info->untagged_ports = sw_r32(RTL8380_TBL_ACCESS_DATA_0(0));
-	
-	return 0;
+static void rtl838x_vlan_set_untagged(u32 vlan, u32 portmask)
+{
+	u32 cmd = 1 << 15 /* Execute cmd */
+		| 0 << 14 /* Write */
+		| 0 << 12 /* Table type 0b00 */
+		| (vlan & 0xfff);
+	sw_w32(portmask & 0x1fffffff, RTL838X_TBL_ACCESS_DATA_0(0));
+	sw_w32(cmd, RTL838X_TBL_ACCESS_CTRL_1);
+	do { } while (sw_r32(RTL838X_TBL_ACCESS_CTRL_1) & (1 << 15));
 }
 
 static void rtl838x_vlan_profile_dump(int index)
@@ -956,18 +1016,40 @@ static int rtl838x_vlan_filtering(struct dsa_switch *ds, int port,
 	struct rtl838x_priv *priv = ds->priv;
 	printk("rtl838x_port_vlan_filtering port %d\n", port);
 	mutex_lock(&priv->reg_mutex);
-	
+
 	if (vlan_filtering) {
-		/* Enable egress filtering */
+		/* Enable ingress and egress filtering */
+		if (port != CPU_PORT) {
+			if (port < 16) {
+				sw_w32_mask(0b10 << (port << 1),
+					    0b01 << (port << 1),
+					    RTL838X_VLAN_PORT_IGR_FLTR_0);
+			} else {
+				sw_w32_mask(0b10 << ( (port - 16) << 1),
+					    0b01 << ( (port - 16) << 1),
+					    RTL838X_VLAN_PORT_IGR_FLTR_1);
+			}
+		}
 		sw_w32_mask(0, 1 << port, RTL838X_VLAN_PORT_EGR_FLTR);
 	} else { 
-		/* Disable egress filtering */
+		/* Disable ingress and egress filtering */
+		if (port != CPU_PORT) {
+			if (port < 16) {
+				sw_w32_mask(0b11 << (port << 1),
+					    0,
+					    RTL838X_VLAN_PORT_IGR_FLTR_0);
+			} else {
+				sw_w32_mask(0b11 << ( (port - 16) << 1),
+					    0,
+					    RTL838X_VLAN_PORT_IGR_FLTR_1);
+			}
+		}
 		sw_w32_mask(1 << port, 0, RTL838X_VLAN_PORT_EGR_FLTR);
 	}
-	
+
 	/* We need to do something to the CPU-Port, too */
 	mutex_unlock(&priv->reg_mutex);
-	
+
 	return 0;
 }
 	
@@ -977,15 +1059,17 @@ static int rtl838x_vlan_prepare(struct dsa_switch *ds, int port,
 	struct rtl838x_vlan_info info;
 	struct rtl838x_priv *priv = ds->priv;
 	mutex_lock(&priv->reg_mutex);
-	
+
 	printk("rtl838x_vlan_prepare, port %d\n", port);
 	rtl838x_vlan_profile_dump(0);
-	
+
 	rtl838x_vlan_tables_read(1, &info);
-	
-	printk("Tagged ports %x, untagged %x, conf %x\n", info.tagged_ports,
-		info.untagged_ports, info.vlan_conf);
-	
+
+	printk("Tagged ports %x, untag %x, prof %x, MC# %d, UC# %d, MSTI %x\n",
+		info.tagged_ports, info.untagged_ports, info.vlan_conf & 7,
+	       (info.vlan_conf & 8) >> 3, (info.vlan_conf & 16) >> 4,
+	       (info.vlan_conf & 0x3e0) >> 5 );
+
 	mutex_unlock(&priv->reg_mutex);
 	return 0;
 }
@@ -993,10 +1077,45 @@ static int rtl838x_vlan_prepare(struct dsa_switch *ds, int port,
 static void rtl838x_vlan_add(struct dsa_switch *ds, int port,
 			    const struct switchdev_obj_port_vlan *vlan)
 {
-	printk("rtl838x_vlan_add, port %d\n", port);
-	/* Set port inner VID */
-//	RTL838X_VLAN_PORT_PB_VLAN(port)
-	return;
+	struct rtl838x_vlan_info info;
+	struct rtl838x_priv *priv = ds->priv;
+	int v;
+	u32 portmask;
+
+	printk("rtl838x_vlan_add, port %d, vid_end %d, vid_end %d, flags %x\n",
+	       port, vlan->vid_begin, vlan->vid_end, vlan->flags);
+	if (vlan->vid_begin > 4095 || vlan->vid_end > 4095) {
+		dev_err(priv->dev, "VLAN out of range: %d - %d",
+			vlan->vid_begin, vlan->vid_end);
+		return;
+	}
+
+	mutex_lock(&priv->reg_mutex);
+
+	if (vlan->flags & BRIDGE_VLAN_INFO_PVID) {
+		/* Set both innter and out PVID of the port */
+		sw_w32( (vlan->vid_begin << 16) | vlan->vid_begin,
+			RTL838X_VLAN_PORT_PB_VLAN(port));
+		mutex_unlock(&priv->reg_mutex);
+		return;
+	}
+
+	if (vlan->flags & BRIDGE_VLAN_INFO_UNTAGGED) {
+		for (v = vlan->vid_begin; v <= vlan->vid_end; v++) {
+			/* Get untagged port memberships of this vlan */
+			rtl838x_vlan_tables_read(v, &info);
+			portmask = info.untagged_ports | (1 << port);
+			rtl838x_vlan_set_untagged(v, portmask);
+		}
+	} else {
+		for (v = vlan->vid_begin; v <= vlan->vid_end; v++) {
+			/* Get tagged port memberships of this vlan */
+			rtl838x_vlan_tables_read(v, &info);
+			portmask = info.tagged_ports | (1 << port);
+			rtl838x_vlan_set_tagged(v, portmask, info.vlan_conf);
+		}
+	}
+	mutex_unlock(&priv->reg_mutex);
 }
 
 static int rtl838x_vlan_del(struct dsa_switch *ds, int port,
@@ -1039,7 +1158,7 @@ static void rtl838x_port_bridge_leave (struct dsa_switch *ds, int port,
 	}
 	priv->ports[port].pm &= ~port_bitmap;
 	mutex_unlock(&priv->reg_mutex);
-	
+
 	print_matrix();
 	return;
 }
@@ -1078,7 +1197,7 @@ static int rtl838x_port_bridge_join(struct dsa_switch *ds, int port,
 	}
 	priv->ports[port].pm |= port_bitmap;
 	mutex_unlock(&priv->reg_mutex);
-	
+
 	print_matrix();
 	return 0;
 }
@@ -1090,17 +1209,20 @@ static int rtl838x_port_enable(struct dsa_switch *ds, int port,
 	struct rtl838x_priv *priv = ds->priv;
 	printk("rtl838x_port_enable: %x %d", (u32) priv, port);
 	priv->ports[port].enable = true;
-	
+
 	if (dsa_is_cpu_port(ds, port))
 		return 0;
-	
+
 	/* add port to switch mask of CPU_PORT */
 	sw_w32_mask(0, 1 << port, RTL838X_PORT_ISO_CTRL(CPU_PORT));
-	
+
+	/* add all other ports in the same bridge to switch mask of port */
+	sw_w32_mask(0, priv->ports[port].pm, RTL838X_PORT_ISO_CTRL(port));
+
 	/* enable PHY polling */
 	bit = rtl838x_get_port_bit(port);
 	sw_w32_mask(0, 1 << bit, RTL838X_SMI_POLL_CTRL);
-	
+
 	return 0;
 }
 
@@ -1114,16 +1236,19 @@ static void rtl838x_port_disable(struct dsa_switch *ds, int port,
 	/* you can only disable user ports */
 	if (!dsa_is_user_port(ds, port))
 		return;
-	
+
 	/* remove port from switch mask of CPU_PORT */
 	sw_w32_mask(1 << port, 0, RTL838X_PORT_ISO_CTRL(CPU_PORT));
-	
+
+	/* remove all other ports in the same bridge from switch mask of port */
+	sw_w32_mask(priv->ports[port].pm, 0, RTL838X_PORT_ISO_CTRL(port));
+
 	priv->ports[port].enable = false;
-	
+
 	/* disable PHY polling */
 	bit = rtl838x_get_port_bit(port);
 	sw_w32_mask(1 << bit, 0, RTL838X_SMI_POLL_CTRL);
-	
+
 	return;
 }
 
@@ -1138,6 +1263,7 @@ static const struct dsa_switch_ops rtl838x_switch_ops = {
 	.port_vlan_del = rtl838x_vlan_del,
 	.port_bridge_join = rtl838x_port_bridge_join,
 	.port_bridge_leave = rtl838x_port_bridge_leave,
+	.port_stp_state_set = rtl838x_port_stp_state_set,
 	.port_enable = rtl838x_port_enable,
 	.port_disable = rtl838x_port_disable,
 	.phy_read = dsa_phy_read,
@@ -1152,6 +1278,7 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 	int err = 0;
 	struct rtl838x_priv *priv;
 	struct device *dev = &pdev->dev;
+	struct rtl838x_vlan_info info;
 
 	printk("Probing RTL838X switch device\n");
 	// dump_stack();
@@ -1195,6 +1322,22 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 	err = dsa_register_switch(priv->ds);
 	if(err)
 		printk("Error registering switch: %d\n", err);
+
+	rtl838x_vlan_profile_dump(0);
+
+	rtl838x_vlan_tables_read(1, &info);
+	printk("Tagged %x, untagged %x, prof %x, MC# %d, UC# %d, MSTI %x\n",
+	       info.tagged_ports, info.untagged_ports, info.vlan_conf & 7,
+	       (info.vlan_conf & 8) >> 3, (info.vlan_conf & 16) >> 4,
+	       (info.vlan_conf & 0x3e0) >> 5 );
+
+	rtl838x_vlan_profile_dump(1);
+
+	rtl838x_vlan_tables_read(2, &info);
+	printk("Tagged %x, untagged %x, prof %x, MC# %d, UC# %d, MSTI %x\n",
+	       info.tagged_ports, info.untagged_ports, info.vlan_conf & 7,
+	       (info.vlan_conf & 8) >> 3, (info.vlan_conf & 16) >> 4,
+	       (info.vlan_conf & 0x3e0) >> 5 );
 
 	return err;
 }
