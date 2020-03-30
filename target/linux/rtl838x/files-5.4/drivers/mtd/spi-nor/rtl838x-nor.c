@@ -28,7 +28,7 @@ struct rtl838x_nor {
 static uint32_t spi_prep(struct rtl838x_nor *nor)
 {
 	/* Needed because of MMU constraints */
-	SPI_READY;
+	SPI_WAIT_READY;
 	spi_w32w(SPI_CS_INIT, SFCSR);	//deactivate CS0, CS1
 	spi_w32w(0, SFCSR); 		//activate CS0,CS1
 	spi_w32w(SPI_CS_INIT, SFCSR); 	//deactivate CS0, CS1
@@ -48,7 +48,7 @@ static uint32_t rtl838x_nor_get_SR(struct rtl838x_nor *nor)
 	spi_w32w(sfcsr, SFCSR);
 	spi_w32w(sfdr, SFDR);
 	spi_w32_mask(0, SPI_LEN4, SFCSR);
-	SPI_READY;
+	SPI_WAIT_READY;
 	
 	return spi_r32(SFDR);
 }
@@ -96,7 +96,7 @@ static ssize_t rtl838x_do_read(struct rtl838x_nor *nor,loff_t from, size_t lengt
 	
 	/* Read Data, 4 bytes at a time */
 	while (length >= 4){
-		SPI_READY;
+		SPI_WAIT_READY;
 		*((uint32_t*) buffer) = spi_r32(SFDR);
 /*		printk("%.8x  ", *((uint32_t*) buffer)); */
 		buffer += 4;
@@ -105,10 +105,10 @@ static ssize_t rtl838x_do_read(struct rtl838x_nor *nor,loff_t from, size_t lengt
 	
 	/* The rest needs to be read 1 byte a time */
 	sfcsr &= SPI_LEN_INIT|SPI_LEN1;
-	SPI_READY;
+	SPI_WAIT_READY;
 	spi_w32w(sfcsr, SFCSR);
 	while (length > 0) {
-		SPI_READY;
+		SPI_WAIT_READY;
 		*(buffer) = spi_r32(SFDR) >> 24;
 /*	    	printk("%.2x  ", *(buffer)); */
 		buffer++;
@@ -141,7 +141,7 @@ static ssize_t rtl838x_do_write(struct rtl838x_nor *nor,loff_t to, size_t length
 	/* Read Data, 4 bytes at a time, if we are 4-byte aligned */
 	if (!(((long)buffer) % 4) ){ 
 		while (length >= 4){
-			SPI_READY;
+			SPI_WAIT_READY;
 			spi_w32(*((uint32_t*)buffer), SFDR);
 			buffer += 4;
 			length -= 4;
@@ -150,10 +150,10 @@ static ssize_t rtl838x_do_write(struct rtl838x_nor *nor,loff_t to, size_t length
 	
 	/* The rest needs to be read 1 byte a time */
 	sfcsr &= SPI_LEN_INIT | SPI_LEN1;
-	SPI_READY;
+	SPI_WAIT_READY;
 	spi_w32w(sfcsr, SFCSR);
 	while (length > 0) {
-		SPI_READY;
+		SPI_WAIT_READY;
 		spi_w32(*(buffer) << 24, SFDR);
 		buffer++;
 		length--;
@@ -243,7 +243,7 @@ static int rtl838x_nor_read_reg(struct spi_nor *nor, u8 opcode, u8 *buf, int len
 	spi_w32w(sfdr, SFDR);
 	
 	while (length > 0) {
-		SPI_READY;
+		SPI_WAIT_READY;
 		*(buffer) = spi_r32(SFDR) >> 24;
 	    	printk("%.2x  ", *(buffer));
 		buffer++;
@@ -288,12 +288,12 @@ static int spi_read_id(struct rtl838x_nor *nor)
 	spi_w32w(sfcsr, SFCSR);
 	spi_w32w(sfdr, SFDR);
 	spi_w32_mask(0, SPI_LEN4, SFCSR);
-	SPI_READY;
+	SPI_WAIT_READY;
 	
 	ret = spi_r32(SFDR);
 	
 	while (size >= 4) {
-		SPI_READY;
+		SPI_WAIT_READY;
 		*((uint32_t*) buffer) = spi_r32(SFDR);
 		buffer += 4;
 		size -= 4;
@@ -319,7 +319,7 @@ static int spi_enter_sio(struct spi_nor *nor)
 	sfcr2 = SFCR2_HOLD_TILL_SFDR2 | SFCR2_SIZE(SFCR2_GETSIZE( tmp )) | (tmp & SFCR2_RDOPT)
 		| SFCR2_CMDIO( 0 ) | SFCR2_ADDRIO( 0 ) |  SFCR2_DUMMYCYCLE( 4 )
 		| SFCR2_DATAIO( 0 ) | SFCR2_SFCMD(SPINOR_OP_READ_FAST);
-	SPI_READY;
+	SPI_WAIT_READY;
 	spi_w32w(sfcr2, SFCR2);
 	spi_w32w(sfcsr, SFCSR);
 	spi_w32w(sfdr, SFDR);

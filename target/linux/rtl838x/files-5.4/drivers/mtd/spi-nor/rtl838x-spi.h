@@ -25,8 +25,8 @@
 #define spi_w32(val, reg)	__raw_writel(val, reg)
 #define spi_w32_mask(clear, set, reg)	\
 	spi_w32((spi_r32(reg) & ~(clear)) | (set), reg)
-#define SPI_READY while( !(spi_r32(SFCSR) & SFCSR_SPI_RDY) )
-#define spi_w32w(val, reg)	__raw_writel(val, reg); SPI_READY
+#define SPI_WAIT_READY while( !(spi_r32(SFCSR) & SFCSR_SPI_RDY) )
+#define spi_w32w(val, reg)	__raw_writel(val, reg); SPI_WAIT_READY
 
 
 #define SFRB   ((volatile void *) (0xB8001200))	/*SPI Flash Register Base*/	
