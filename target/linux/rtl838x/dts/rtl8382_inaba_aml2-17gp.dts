@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+/dts-v1/;
+
+#include "rtl838x.dtsi"
+
+/ {
+	compatible = "inaba,aml2-17gp", "realtek,rtl838x-soc";
+	model = "INABA Abaniact AML2-17GP";
+
+	chosen {
+		bootargs = "console=ttyS0,115200";
+	};
+};
+
+&spi0 {
+	status = "okay";
+
+	flash@1 {
+		compatible = "jedec,spi-nor";
+		reg = <1>;
+		spi-max-frequency = <10000000>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "u-boot";
+				reg = <0x00000000 0x00080000>;
+				read-only;
+			};
+
+			partition@80000 {
+				label = "u-boot-env";
+				reg = <0x00080000 0x00010000>;
+				read-only;
+			};
+
+			partition@90000 {
+				label = "SYSINFO";
+				reg = <0x00090000 0x00010000>;
+				read-only;
+			};
+
+			partition@a0000 {
+				label = "JFFS2_CFG";
+				reg = <0x000a0000 0x00400000>;
+				read-only;
+			};
+
+			partition@4a0000 {
+				label = "JFFS2_LOG";
+				reg = <0x004a0000 0x00100000>;
+				read-only;
+			};
+
+			partition@5a0000 {
+				label = "RUNTIME";
+				reg = <0x005a0000 0x00d30000>;
+				read-only;
+			};
+
+			partition@12d0000 {
+				label = "RUNTIME2";
+				reg = <0x012d0000 0x00d30000>;
+				read-only;
+			};
+		};
+	};
+};

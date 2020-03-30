@@ -10,9 +10,9 @@ ARCH:=mips
 CPU_TYPE:=4kec
 BOARD:=rtl838x
 BOARDNAME:=Realtek MIPS
-FEATURES:=squashfs
+FEATURES:=ramdisk squashfs
 
-KERNEL_PATCHVER:=4.19
+KERNEL_PATCHVER:=5.4
 
 define Target/Description
 	Build firmware images for Realtek RTL838x  based boards.
