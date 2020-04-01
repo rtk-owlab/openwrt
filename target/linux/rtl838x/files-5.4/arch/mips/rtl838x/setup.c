@@ -37,6 +37,11 @@ struct clk cpu_clk;
 static void rtl838x_restart(char *command)
 {
 	printk("System restart.\n");
+	/* Disable 4-byte SPI reads */
+	rtl838x_w32(3, (volatile void *)0xBB000058);
+	rtl838x_w32_mask(0xC0000000, 0xCFFFFFFF, RTL838X_PLL_CML_CTRL);
+	rtl838x_w32(0, (volatile void *)0xBB000058);
+
 	/* Reset Global Control1 Register */
 	rtl838x_w32(1, (volatile void *)0xBB000040);
 }
@@ -57,10 +62,9 @@ static void __init rtl838x_setup(void)
 
 	val = rtl838x_r32((volatile void *)0xBB0040000);
 	if (val==3)
-		printk("PCI device found\n");
+		pr_info("PCI device found\n");
 	else
-		printk("NO PCI device found\n");
-	
+		pr_info("NO PCI device found\n");
 }
 
 void __init plat_mem_setup(void)
@@ -92,7 +96,7 @@ void __init plat_mem_setup(void)
 */
 int clk_enable(struct clk *clk)
 {
-        return 0;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(clk_enable);
 
@@ -103,22 +107,22 @@ EXPORT_SYMBOL_GPL(clk_disable);
 
 unsigned long clk_get_rate(struct clk *clk)
 {
-        if (!clk)
-                return 0;
+	if (!clk)
+		return 0;
 
-        return clk->rate;
+	return clk->rate;
 }
 EXPORT_SYMBOL_GPL(clk_get_rate);
 
 int clk_set_rate(struct clk *clk, unsigned long rate)
 {
-        return -1;
+	return -1;
 }
 EXPORT_SYMBOL_GPL(clk_set_rate);
 
 long clk_round_rate(struct clk *clk, unsigned long rate)
 {
-        return -1;
+	return -1;
 }
 EXPORT_SYMBOL_GPL(clk_round_rate);
 

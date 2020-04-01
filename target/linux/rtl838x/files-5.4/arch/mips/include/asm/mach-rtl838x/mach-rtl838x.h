@@ -319,7 +319,8 @@
 /*
  * GPIO
  */
-#define GPIO_A0_REG		((volatile void *) 0xBB0A0000)
+#define RTL838X_SWITCH_BASE	((volatile void *) 0xBB000000)
+#define RTL838X_LED_GLB_CTRL	((volatile void *) 0xBB00A000)
 #define GPIO_CTRL_REG_BASE	((volatile void *) 0xb8003500)
 #define RTL838X_GPIO_PABC_CNR	(GPIO_CTRL_REG_BASE + 0x0)
 #define RTL838X_GPIO_PABC_DIR	(GPIO_CTRL_REG_BASE + 0x8)
@@ -351,5 +352,8 @@
 #define RTL838X_GPIO_C2		10
 #define RTL838X_GPIO_C1		9
 #define RTL838X_GPIO_C0		8
+
+#define RTL838X_EXT_VERSION	(RTL838X_SWITCH_BASE + 0xD0)
+#define RTL838X_PLL_CML_CTRL	(RTL838X_SWITCH_BASE + 0xFF8)
 
 #endif   /* _MACH_RTL838X_H_ */

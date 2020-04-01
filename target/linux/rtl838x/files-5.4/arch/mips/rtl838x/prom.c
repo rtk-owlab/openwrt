@@ -88,22 +88,22 @@ void __init device_tree_init(void)
 	if (!fdt_check_header(&__appended_dtb)) {
 		fdt = &__appended_dtb;
 		pr_info("Using appended Device Tree.\n");
-        }
-        initial_boot_params = (void *)fdt;
-        unflatten_and_copy_device_tree();
+	}
+	initial_boot_params = (void *)fdt;
+	unflatten_and_copy_device_tree();
 }
 
 void rtl838x_sys_led_on(void)
 {
-    /*RTL838xM internal GPIO_A0 is defined as sys_led
-    rtl838x_w32_mask(0, 1<<15, GPIO_A0_REG); BUG: Is this correct? */
+	// Switch on sys-led
+	rtl838x_w32_mask(0, 1 << 15, RTL838X_LED_GLB_CTRL);
+	// 0: off 1: rapid blink, 2: slow blink, 3: steady
+	rtl838x_w32_mask(0, 3 << 16, RTL838X_LED_GLB_CTRL);
 }
 
 void rtl838x_sys_led_off(void)
 {
-	/*
-	rtl838x_w32_mask(1<<15, 0, GPIO_A0_REG);
-	*/
+	rtl838x_w32_mask(1<<15, 0, RTL838X_LED_GLB_CTRL);
 }
 
 static void __init prom_init_cmdline(void)

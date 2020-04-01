@@ -330,7 +330,7 @@ int rtl838x_read_phy(u32 port, u32 page, u32 reg, u32 *val)
 	u32 park_page;
 
 //	printk("PHY-read: port %d reg: %x\n", port, reg);
-	
+
 	if (port > 27 || page > 4095 || reg > 31)
 		return -1;
 	
@@ -811,7 +811,7 @@ rtl838x_get_tag_protocol(struct dsa_switch *ds, int port)
 }
 
 void rtl838x_fixed_link_update(struct dsa_switch *ds, int port,
-                                struct fixed_phy_status *st)
+			       struct fixed_phy_status *st)
 { 
 	int offset = 0;
 	u32 reg;
