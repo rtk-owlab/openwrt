@@ -636,7 +636,7 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	const void *mac;
 	int err;
 
-	pr_info("Probing RTL838X eth device\n");
+	pr_info("Probing RTL838X eth device pdev: %x, dev: %x\n", (u32)pdev, (u32)(&(pdev->dev)));
 	if (!pdev->dev.of_node) {
 		dev_err(&pdev->dev, "No DT found\n");
 		return -EINVAL;
@@ -648,6 +648,8 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	}
 	SET_NETDEV_DEV(dev, &pdev->dev);
 	priv = netdev_priv(dev);
+	/* copy device tree node to be used by switch device */
+	dev->dev.of_node = pdev->dev.of_node;
 	
 	/* obtain buffer memory space */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);

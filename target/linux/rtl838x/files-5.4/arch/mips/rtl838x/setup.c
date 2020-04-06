@@ -37,9 +37,13 @@ struct clk cpu_clk;
 static void rtl838x_restart(char *command)
 {
 	printk("System restart.\n");
+	pr_info("PLL control register: %x\n", rtl838x_r32(RTL838X_PLL_CML_CTRL));
 	/* Disable 4-byte SPI reads */
 	rtl838x_w32(3, (volatile void *)0xBB000058);
+// For D-Link
 	rtl838x_w32_mask(0xC0000000, 0xCFFFFFFF, RTL838X_PLL_CML_CTRL);
+// For Zyxel
+// 	rtl838x_w32_mask(0xC0000000, 0, RTL838X_PLL_CML_CTRL);
 	rtl838x_w32(0, (volatile void *)0xBB000058);
 
 	/* Reset Global Control1 Register */
@@ -150,7 +154,8 @@ void __init plat_time_init(void)
 
 	pr_info("CPU Clock: %ld MHz\n", clk->rate /1000000);
 	mips_hpt_frequency = freq / 2;
-
+	pr_info("PLL control register: %x\n", rtl838x_r32(RTL838X_PLL_CML_CTRL));
+	
 	/* With the info from the command line and cpu-freq we can setup the console */
 	rtl838x_serial_init();
 }

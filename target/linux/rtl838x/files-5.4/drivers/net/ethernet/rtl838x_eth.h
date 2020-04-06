@@ -72,7 +72,6 @@
 #define RTL838X_TBL_ACCESS_CTRL_1		(RTL838X_SW_BASE + 0xA4C8)
 #define RTL838X_TBL_ACCESS_DATA_1(idx)		(RTL838X_SW_BASE + 0xA4CC + ((idx) << 2))
 
-
 /* RTL8231 registers for LED control */
 #define RTL8231_LED_FUNC0			0x0000
 #define RTL8231_GPIO_PIN_SEL(gpio)		((0x0002) + ((gpio) >> 4))
