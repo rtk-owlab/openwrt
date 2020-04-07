@@ -361,12 +361,12 @@ int dsa_phy_read(struct dsa_switch *ds, int phy_addr, int phy_reg)
 		if (phy_addr == 26)
 			offset = 0x100;
 		val = sw_r32(MAPLE_SDS4_FIB_REG0r + offset + (phy_reg << 2)) & 0xffff;
-//		printk("PHY-read: port %d reg: %x res: %x\n", phy_addr, phy_reg, *val);
+		printk("PHY-read from SDS: port %d reg: %x res: %x\n", phy_addr, phy_reg, val);
 		return val;
 	}
 
 	rtl838x_read_phy(phy_addr, 0, phy_reg, &val);
-	printk("PHY-read: port %d reg: %x res: %x\n", phy_addr, phy_reg, val);
+//	printk("PHY-read: port %d reg: %x res: %x\n", phy_addr, phy_reg, val);
 	return val;
 }
 
@@ -377,7 +377,7 @@ int dsa_phy_write(struct dsa_switch *ds, int phy_addr, int phy_reg, u16 val)
 	
 	if (phy_addr >= 24 && phy_addr <= 27 
 	     && priv->ports[24].phy == PHY_RTL838X_SDS) {
-		printk("phy_write to SDS, port %d\n", phy_addr);
+		printk("PHY_write to SDS, port %d\n", phy_addr);
 		if (phy_addr == 26)
 			offset = 0x100;
 		sw_w32(val, MAPLE_SDS4_FIB_REG0r + offset + (phy_reg << 2));
@@ -506,7 +506,7 @@ static int rtl8380_configure_int_rtl8218b(int mac)
 			if (val & 0x40) break;
 		}
 		if (i >= 100) {
-			printk("ERROR: Port %d not ready\n", p);
+			printk("ERROR: Port %d not ready for patch.\n", p);
 			return -1;
 		}
 	}
@@ -666,32 +666,7 @@ static int rtl8380_configure_ext_rtl8218b(int mac)
 				  rtl8218B_6276B_rtl8380_perport[i][1]);
 		i++;
 	}
-	
-	/*
-	rtl838x_write_phy(mac + 0, 0xfff, 0x1f, 0x0a42);
-	rtl838x_write_phy(mac + 0, 0xfff, 0x16, 0x0f91);
-
-	rtl838x_write_phy(mac + 1, 0xfff, 0x1f, 0x0a42);
-	rtl838x_write_phy(mac + 1, 0xfff, 0x16, 0x0fd1);
-
-	rtl838x_write_phy(mac + 2, 0xfff, 0x1f, 0x0a42);
-	rtl838x_write_phy(mac + 2, 0xfff, 0x16, 0x0fd1);
-	rtl838x_write_phy(mac + 3, 0xfff, 0x1f, 0x0a42);
-	rtl838x_write_phy(mac + 3, 0xfff, 0x16, 0x0f51);
-
-	rtl838x_write_phy(mac + 4, 0xfff, 0x1f, 0x0a42);
-	rtl838x_write_phy(mac + 4, 0xfff, 0x16, 0x0f91);
-
-	rtl838x_write_phy(mac + 5, 0xfff, 0x1f, 0x0a42);
-	rtl838x_write_phy(mac + 5, 0xfff, 0x16, 0x0fd1);
-
-	rtl838x_write_phy(mac + 6, 0xfff, 0x1f, 0x0a42);
-	rtl838x_write_phy(mac + 6, 0xfff, 0x16, 0x0fd1);
-
-	rtl838x_write_phy(mac + 7, 0xfff, 0x1f, 0x0a42);
-	rtl838x_write_phy(mac + 7, 0xfff, 0x16, 0x0f51);
-	*/
-	
+		
 	/*Disable broadcast ID*/
 	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0000);
 	rtl838x_write_phy(mac, 0xfff, 0x1d, 0x0008);
@@ -1193,7 +1168,7 @@ static int rtl838x_setup(struct dsa_switch *ds)
 			port_bitmap |= 1 << i;
 		}
 	}
-	printk("Port-isolation bitmap: %8x\n", port_bitmap);
+//	printk("Port-isolation bitmap: %8x\n", port_bitmap);
 	sw_w32(port_bitmap, RTL838X_PORT_ISO_CTRL(CPU_PORT));
 	
 	print_matrix();
@@ -1663,7 +1638,6 @@ static int rtl838x_port_fdb_dump(struct dsa_switch *ds, int port,
 static int rtl838x_port_enable(struct dsa_switch *ds, int port,
 				struct phy_device *phydev)
 {
-	int bit;
 	struct rtl838x_priv *priv = ds->priv;
 	printk("rtl838x_port_enable: %x %d", (u32) priv, port);
 	priv->ports[port].enable = true;
@@ -1685,7 +1659,6 @@ static int rtl838x_port_enable(struct dsa_switch *ds, int port,
 
 static void rtl838x_port_disable(struct dsa_switch *ds, int port)
 {
-	int bit;
 	struct rtl838x_priv *priv = ds->priv;
 	printk("rtl838x_port_disable %x: %d", (u32)priv, port);
 
@@ -1778,7 +1751,7 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 		printk("Error registering switch: %d\n", err);
 		return err;
 	}
-
+/*
 	rtl838x_vlan_profile_dump(0);
 
 	rtl838x_vlan_tables_read(1, &info);
@@ -1794,7 +1767,7 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 	       info.tagged_ports, info.untagged_ports, info.vlan_conf & 7,
 	       (info.vlan_conf & 8) >> 3, (info.vlan_conf & 16) >> 4,
 	       (info.vlan_conf & 0x3e0) >> 5 );
-
+*/
 	return err;
 }
 
