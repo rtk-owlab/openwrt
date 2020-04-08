@@ -36,16 +36,18 @@ struct clk cpu_clk;
 
 static void rtl838x_restart(char *command)
 {
+	u32 pll = rtl838x_r32(RTL838X_PLL_CML_CTRL);
+	pr_info("PLL control register: %x\n", pll);
 	printk("System restart.\n");
-	pr_info("PLL control register: %x\n", rtl838x_r32(RTL838X_PLL_CML_CTRL));
-	/* Disable 4-byte SPI reads */
-	rtl838x_w32(3, (volatile void *)0xBB000058);
-// For D-Link
-	rtl838x_w32_mask(0xC0000000, 0xCFFFFFFF, RTL838X_PLL_CML_CTRL);
-// For Zyxel
-// 	rtl838x_w32_mask(0xC0000000, 0, RTL838X_PLL_CML_CTRL);
-	rtl838x_w32(0, (volatile void *)0xBB000058);
-
+	
+	if (pll != 0xaaaaaaaf) { // Fix reset for D-Link
+		rtl838x_w32(3, (volatile void *)0xBB000058);
+		// For D-Link
+		rtl838x_w32_mask(0xC0000000, 0xCFFFFFFF, RTL838X_PLL_CML_CTRL);
+		// For Zyxel
+		// 	rtl838x_w32_mask(0xC0000000, 0, RTL838X_PLL_CML_CTRL);
+		rtl838x_w32(0, (volatile void *)0xBB000058);
+	}
 	/* Reset Global Control1 Register */
 	rtl838x_w32(1, (volatile void *)0xBB000040);
 }

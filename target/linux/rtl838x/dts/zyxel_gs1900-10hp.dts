@@ -1,24 +1,43 @@
 /dts-v1/;
 
+#include "rtl838x.dtsi"
 
 #include <dt-bindings/input/input.h>
-#include "rtl838x.dtsi"
+#include <dt-bindings/gpio/gpio.h>
 
 / {
 	compatible = "zyxel,gs1900", "realtek,rtl838x-soc";
 	model = "Zyxel GS1900-10HP Switch";
-/*
+
 	aliases {
-		led-boot = &led_status_yellow;
-		led-failsafe = &led_status_red;
-		led-running = &led_status_blue;
-		led-upgrade = &led_status_yellow;
+		led-boot = &led_sys;
+		led-failsafe = &led_sys;
+		led-running = &led_sys;
+		led-upgrade = &led_sys;
 	};
-*/
+
 	chosen {
 		bootargs = "console=ttyS0,115200 mem=128M";
 	};
-	
+
+	keys {
+		compatible = "gpio-keys-polled";
+
+		reset {
+			label = "reset";
+			gpios = <&gpio0 67 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led_sys: sys {
+			label = "gs1900:green:sys";
+			gpios = <&gpio0 47 GPIO_ACTIVE_HIGH>;
+	};
+
 	ethernet0: ethernet@0xbb000000 {
 		status = "okay";
 		compatible = "realtek,rtl838x-eth";

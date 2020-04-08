@@ -17,10 +17,6 @@
 #include "../ethernet/rtl838x_eth.h"
 #include <asm/mach-rtl838x/mach-rtl838x.h>
 
-#define RTL838X_GPIO_PABC_DIR	(GPIO_CTRL_REG_BASE + 0x8)
-#define RTL838X_GPIO_A1		25
-#define RTL838X_GPIO_PABC_DATA	(GPIO_CTRL_REG_BASE + 0xc)
-
 #define RTL8380_VERSION_A 'A'
 #define RTL8380_VERSION_B 'B'
 
@@ -111,144 +107,6 @@ static const struct rtl838x_mib_desc rtl838x_mib[] = {
 	MIB_DESC(1, 0x40, "rxMacDiscards")
 };
 
-u32 rtl838x_rtl8231_read(u32 phy, u32 reg)
-{
-	/* Calculate read register address */
-	u32 t = (phy << 2) & (0x1f << 2);
-	t |= (reg << 7) & (0x1f << 7);
-	
-	/* Set execution bit: cleared when operation completed */
-	t |= 1;
-	sw_w32(t, RTL838X_EXT_GPIO_INDRT_ACCESS);
-	do {	/* TODO: Return 0x80000000 if timeout */
-		t = sw_r32(RTL838X_EXT_GPIO_INDRT_ACCESS);
-	} while (t & 1);
-	
-	return (t & 0xffff0000) >> 16;
-}
-
-int rtl838x_rtl8231_write(u32 phy, u32 reg, u32 data)
-{
-	u32 t = (phy << 2) & (0x1f << 2);
-	printk("rtl838x_rtl8231_write: %x, %x, %x\n", phy, reg, data);
-	t |= (reg << 7) & (0x1f << 7);
-	/* Set write bit */
-	t |= 2;
-
-	/* Set execution bit: cleared when operation completed */
-	t |= 1;
-	sw_w32(t, RTL838X_EXT_GPIO_INDRT_ACCESS);
-	printk("AAA\n");
-	do {	/* TODO: Return -1 if timeout */
-		t = sw_r32(RTL838X_EXT_GPIO_INDRT_ACCESS);
-	} while (t & 1);
-	
-	return 0;
-}
-
-int rtl8231_pin_set_direction(int phy, u32 gpio, u32 dir)
-{
-	/* dir 1: input
-	 * dir 0: output
-	 */
-	
-	 u32  v;
-	 
-	 if( gpio > 31 ) {
-		 return -1;
-		 printk("rtl8231_pin_set_direction: GPIO >= 32 not implemented!");
-	 }
-	 
-	/* GPIO Selection */
-	v = rtl838x_rtl8231_read(phy, RTL8231_GPIO_IO_SEL(gpio));
-	if (v & 0x80000000) {
-		printk("Error reading RTL8231\n");
-		return -1;
-	}
-	rtl838x_rtl8231_write(phy, RTL8231_GPIO_PIN_SEL(gpio), v | (1 << (gpio % 16)));
-
-	
-	v = rtl838x_rtl8231_read(phy, RTL8231_GPIO_IO_SEL(gpio));
-	if (v & 0x80000000) {
-		printk("Error reading RTL8231\n");
-		return -1;
-	}
-	rtl838x_rtl8231_write(phy, RTL8231_GPIO_IO_SEL(gpio),
-				(v & ~(1 << (gpio % 16))) | (dir << (gpio % 16)));
-	return 0;
-}
-
-int rtl8231_pin_set(u32 phy, u32 gpio, u32 data)
-{
-	u32 v = rtl838x_rtl8231_read(phy, RTL8231_GPIO_CTRL(gpio));
-	if (v & 0x80000000) {
-		printk("Error reading RTL8231\n");
-		return -1;
-	}
-	rtl838x_rtl8231_write(phy, RTL8231_GPIO_CTRL(gpio), 
-			      (v & ~(1 << (gpio % 16))) | (data << (gpio % 16)));
-	return 0;
-}
-
-
-/* Needed for the Zyxel */
-int rtl8231_init(void)
-{
-	uint32_t v;
-	printk("rtl8231_init\n");
-	/* Enable RTL8231 indirect access mode */
-	sw_w32_mask(0, 1, RTL838X_EXTRA_GPIO_CTRL);
-	sw_w32_mask(3, 1, RTL838X_DMY_REG5);
-
-	printk("1\n");
-	
-	/* Reset RTL8231 via GPIO_A1 line */
-	sw_w32_mask(0, 1 << RTL838X_GPIO_A1, RTL838X_GPIO_PABC_DIR);
-	sw_w32_mask(0, 1 << RTL838X_GPIO_A1, RTL838X_GPIO_PABC_DATA);
-
-	printk("2\n");
-	/* wait 50ms for reset */
-	udelay(50000);
-	
-	/*Select GPIO*/
-	rtl838x_rtl8231_write(0, RTL8231_PIN_SEL_REG, 0xffff);
-	rtl838x_rtl8231_write(0, RTL8231_PIN_SEL_REG + 1, 0xffff);
-
-	printk("3\n");
-	/* Set 8231 GPIOs [0-36] to GPI */
-	rtl838x_rtl8231_write(0, 0x5, 0xffff);
-	rtl838x_rtl8231_write(0, 0x6, 0xffff);
-	printk("4\n");
-	v = rtl838x_rtl8231_read(0, 0x4);
-	if (v & 0x80000000) {
-		printk("Error reading RTL8231\n");
-		return -1;
-	}
-	rtl838x_rtl8231_write(0, 0x4, v | (0x1f << 5));
-
-	printk("5\n");
-	/* 8231 PINs 5/6/8 to output*/
-	rtl8231_pin_set_direction(0, 5, 0);
-	rtl8231_pin_set_direction(0, 6, 0);
-	rtl8231_pin_set_direction(0, 8, 0);
-
-	printk("6\n");
-	/* PINs 5/6/8 output high */
-	rtl8231_pin_set(0, 5, 1);
-	rtl8231_pin_set(0, 6, 1);
-	rtl8231_pin_set(0, 8, 1);
-
-	/* Enable RTL8231 */
-	v = rtl838x_rtl8231_read(0, RTL8231_LED_FUNC0);
-	if (v & 0x80000000) {
-		printk("Error reading RTL8231\n");
-		return -1;
-	}
-	printk("7\n");
-	rtl838x_rtl8231_write(0, RTL8231_LED_FUNC0, v | 0x2);
-	printk("rtl8231_init done\n");
-	return 0;
-}
 
 static void rtl8380_get_version(struct rtl838x_priv *priv)
 {
@@ -328,9 +186,7 @@ int rtl838x_read_phy(u32 port, u32 page, u32 reg, u32 *val)
 {
 	u32 v;
 	u32 park_page;
-
-//	printk("PHY-read: port %d reg: %x\n", port, reg);
-
+	
 	if (port > 27 || page > 4095 || reg > 31)
 		return -1;
 
@@ -457,7 +313,7 @@ int rtl8380_sds_power(int mac, int val)
 	}
 
 	sw_w32_mask(0x1f << offset, mode << offset, RTL838X_SDS_MODE_SEL);
-       
+
 	rtl8380_sds_rst(mac);
 
 	return 0;
@@ -736,7 +592,7 @@ static u32 rtl8380_rtl8214fc_perport[][2] = {
 
 static int rtl8380_configure_rtl8214fc(int mac)
 {
-	u32 val, page;
+	u32 val, page = 0;
 	int i,l;
 	
 	rtl838x_read_phy(mac, 0, 3, &val);
@@ -1125,10 +981,7 @@ static int rtl838x_setup(struct dsa_switch *ds)
 		rtl8380_sds_power(24, 1);
 		rtl8380_sds_power(26, 1);
 	}
-	
-	// The following crashes. Add more print statements
-//	rtl8231_init(); /* for Zyxel */
-	
+
 	/* Disable MAC polling the PHY so that we can start configuration */
 	sw_w32(0x00000000, RTL838X_SMI_POLL_CTRL);
 
@@ -1709,7 +1562,7 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 	int err = 0;
 	struct rtl838x_priv *priv;
 	struct device *dev = &pdev->dev;
-	struct rtl838x_vlan_info info;
+//	struct rtl838x_vlan_info info;
 
 	printk("Probing RTL838X switch device\n");
 	if (!pdev->dev.of_node) {
