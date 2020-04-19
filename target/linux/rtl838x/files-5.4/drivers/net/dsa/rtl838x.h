@@ -1,7 +1,9 @@
 //  SPDX-License-Identifier: GPL-2.0-only
 
-#ifndef _RTL838X_ETH_H
-#define _RTL838X_ETH_H
+#ifndef _RTL838X_H
+#define _RTL838X_H
+
+#include <net/dsa.h>
 
 #define RTL838X_SW_BASE ((volatile void *)0xBB000000)
 
@@ -78,8 +80,32 @@
 #define TX_PAUSE_EN				(1 << 6)
 #define RX_PAUSE_EN				(1 << 7)
 
-int rtl838x_write_phy(u32 port, u32 page, u32 reg, u32 val);
-int rtl838x_read_phy(u32 port, u32 page, u32 reg, u32 *val);
 
+enum phy_type {
+	PHY_NONE = 0,
+	PHY_RTL838X_SDS = 1,
+	PHY_RTL8218B_INT = 2,
+	PHY_RTL8218B_EXT = 3,
+	PHY_RTL8214FC = 4
+};
 
-#endif /* _RTL838X_ETH_H */
+struct rtl838x_port {
+	bool enable;
+	u32 pm;
+	u16 pvid;
+	enum phy_type phy;
+};
+
+struct rtl838x_switch_priv {
+	/* Switch operation */
+	struct dsa_switch *ds;
+	struct device *dev;
+	u32 id;
+	char version;
+	struct rtl838x_port ports[32]; /* TODO: correct size! */
+	struct mutex reg_mutex;
+	int link_state_irq;
+	struct mii_bus *mii_bus;
+};
+
+#endif /* _RTL838X_H */

@@ -14,36 +14,13 @@
 #include <linux/phy_fixed.h>
 #include <net/dsa.h>
 
-#include "../ethernet/rtl838x_eth.h"
 #include <asm/mach-rtl838x/mach-rtl838x.h>
+#include "rtl838x.h"
 
 #define RTL8380_VERSION_A 'A'
 #define RTL8380_VERSION_B 'B'
 
-
-enum phy_type {
-	PHY_NONE = 0,
-	PHY_RTL838X_SDS = 1,
-	PHY_RTL8218B_INT = 2,
-	PHY_RTL8218B_EXT = 3,
-	PHY_RTL8214FC = 4
-};
-
-struct rtl838x_port {
-	bool enable;
-	u32 pm;
-	u16 pvid;
-	enum phy_type phy;
-};
-
-struct rtl838x_priv {
-	struct dsa_switch *ds;
-	struct device *dev;
-	u32 id;
-	char version;
-	struct rtl838x_port ports[32]; /* TODO: correct size! */
-	struct mutex reg_mutex;
-};
+extern void rtl8380_sds_rst(int mac);
 
 struct rtl838x_vlan_info {
 	u32 untagged_ports;
@@ -107,11 +84,142 @@ static const struct rtl838x_mib_desc rtl838x_mib[] = {
 	MIB_DESC(1, 0x40, "rxMacDiscards")
 };
 
+extern int rtl838x_phy_init(struct rtl838x_switch_priv *priv);
 
-static void rtl8380_get_version(struct rtl838x_priv *priv)
+static irqreturn_t rtl838x_switch_irq(int irq, void *dev_id)
+{
+	struct dsa_switch *ds = dev_id;
+//	struct rtl838x_switch_priv *priv = ds->priv;
+	u32 status = sw_r32(RTL838X_ISR_GLB_SRC);
+	u32 ports = sw_r32(RTL838X_ISR_PORT_LINK_STS_CHG);
+	u32 link;
+	int i;
+
+	/* Clear status */
+	sw_w32(ports, RTL838X_ISR_PORT_LINK_STS_CHG);
+	printk("Link change: status: %x, ports %x\n", status, ports);
+	for (i = 0; i < 28; i++) {
+		if (ports & (1 << i)) {
+			link = sw_r32(RTL838X_MAC_LINK_STS);
+			if (link & (1 << i))
+				dsa_port_phylink_mac_change(ds, i, true);
+			else
+				dsa_port_phylink_mac_change(ds, i, false);
+		}
+	}
+	return IRQ_HANDLED;
+}
+
+int rtl8380_sds_power(int mac, int val)
+{
+	u32 mode = (val == 1)? 0x4: 0x9;
+	u32 offset = (mac == 24)? 5: 0;
+
+	if ( (mac != 24) && (mac != 26) ) {
+		printk("rtl8380_sds_power: not a fibre port: %d\n", mac);
+		return -1;
+	}
+
+	sw_w32_mask(0x1f << offset, mode << offset, RTL838X_SDS_MODE_SEL);
+
+	rtl8380_sds_rst(mac);
+
+	return 0;
+}
+
+static int rtl838x_smi_wait_op(int timeout)
+{
+	do {
+		timeout--;
+		udelay(10);
+	} while ((sw_r32(RTL838X_SMI_ACCESS_PHY_CTRL_1) & 0x1) && (timeout >= 0));
+	if (timeout <= 0) {
+		return -1;
+	}
+	return 0;
+}
+
+
+/* 
+ * Write to a register in a page of the PHY
+ */
+int rtl838x_write_phy(u32 port, u32 page, u32 reg, u32 val)
+{
+	u32 v;
+	u32 park_page;
+
+	if (port > 31 || page > 4095 || reg > 31)
+		return -ENOTSUPP;
+	
+	val &= 0xffff;
+	
+	if(rtl838x_smi_wait_op(10000))
+		return -ETIMEDOUT;
+
+	sw_w32(1 << port, RTL838X_SMI_ACCESS_PHY_CTRL_0);
+	mdelay(10);
+
+	sw_w32_mask(0xffff0000, val << 16, RTL838X_SMI_ACCESS_PHY_CTRL_2);
+
+	park_page = sw_r32(RTL838X_SMI_ACCESS_PHY_CTRL_1) & ((0x1f << 15) | 0x2);
+	v = reg << 20 | page << 3 | 0x4;
+	sw_w32(v | park_page, RTL838X_SMI_ACCESS_PHY_CTRL_1);
+	sw_w32_mask(0, 1, RTL838X_SMI_ACCESS_PHY_CTRL_1);
+
+	if(rtl838x_smi_wait_op(10000))
+		return -ETIMEDOUT;
+	
+	return 0;
+}
+
+/* 
+ * Reads a register in a page from the PHY
+ */
+int rtl838x_read_phy(u32 port, u32 page, u32 reg, u32 *val)
+{
+	u32 v;
+	u32 park_page;
+	
+	if (port > 31 || page > 4095 || reg > 31)
+		return -ENOTSUPP;
+
+	if(rtl838x_smi_wait_op(10000))
+		return -ETIMEDOUT;
+		
+
+	sw_w32_mask(0xffff0000, port << 16, RTL838X_SMI_ACCESS_PHY_CTRL_2);
+	
+	park_page = sw_r32(RTL838X_SMI_ACCESS_PHY_CTRL_1) & ((0x1f << 15) | 0x2);
+	v = reg << 20 | page << 3;
+	sw_w32(v | park_page, RTL838X_SMI_ACCESS_PHY_CTRL_1);
+	sw_w32_mask(0, 1, RTL838X_SMI_ACCESS_PHY_CTRL_1);
+
+	if(rtl838x_smi_wait_op(10000))
+		return -ETIMEDOUT;
+
+	*val = sw_r32(RTL838X_SMI_ACCESS_PHY_CTRL_2) & 0xffff;
+//	printk("PHY-read: port %d reg: %x res: %x\n", port, reg, *val);
+
+	return 0;
+}
+static void rtl8380_get_version(struct rtl838x_switch_priv *priv)
 {
 	u32 rw_save, info_save;
 	u32 info;
+
+	priv->id = sw_r32(RTL838X_MODEL_NAME_INFO) >> 16;
+	
+	switch (priv->id) {
+	case 0x8380:
+	printk("Found RTL8380M\n");
+		break;
+	case 0x8382:
+		printk("Found RTL8382M\n");
+		break;
+	default:
+		pr_err("Unknown chip id (%04x)\n", priv->id);
+		priv->id = 0;
+	}
 
 	rw_save = sw_r32(RTL838X_INT_RW_CTRL);
 	sw_w32(rw_save | 0x3, RTL838X_INT_RW_CTRL);
@@ -136,81 +244,12 @@ static void rtl8380_get_version(struct rtl838x_priv *priv)
 	}
 }
 
-int rtl838x_phy_wait_op(int timeout)
-{
-	do {
-		timeout--;
-		udelay(10);
-	} while ((sw_r32(RTL838X_SMI_ACCESS_PHY_CTRL_1) & 0x1) && (timeout >= 0));
-	if (timeout <= 0) {
-		printk("TIMEOUT\n");
-		return -1;
-	}
-	return 0;
-}
-
-/* 
- * Write to a register in a page of the PHY
- */
-int rtl838x_write_phy(u32 port, u32 page, u32 reg, u32 val)
-{
-	u32 v;
-	u32 park_page;
-
-	if (port > 27 || page > 4095 || reg > 31)
-		return -1;
-	
-	val &= 0xffff;
-	
-	rtl838x_phy_wait_op(10000);
-
-	sw_w32(1 << port, RTL838X_SMI_ACCESS_PHY_CTRL_0);
-	udelay(10000);
-
-	sw_w32_mask(0xffff0000, val << 16, RTL838X_SMI_ACCESS_PHY_CTRL_2);
-
-	park_page = sw_r32(RTL838X_SMI_ACCESS_PHY_CTRL_1) & ((0x1f << 15) | 0x2);
-	v = reg << 20 | page << 3 | 0x4;
-	sw_w32(v | park_page, RTL838X_SMI_ACCESS_PHY_CTRL_1);
-	sw_w32_mask(0, 1, RTL838X_SMI_ACCESS_PHY_CTRL_1);
-
-	rtl838x_phy_wait_op(10000);
-
-	return 0;
-}
-
-/* 
- * Reads a register in a page from the PHY
- */
-int rtl838x_read_phy(u32 port, u32 page, u32 reg, u32 *val)
-{
-	u32 v;
-	u32 park_page;
-	
-	if (port > 27 || page > 4095 || reg > 31)
-		return -1;
-
-	rtl838x_phy_wait_op(10000);
-
-	sw_w32_mask(0xffff0000, port << 16, RTL838X_SMI_ACCESS_PHY_CTRL_2);
-	
-	park_page = sw_r32(RTL838X_SMI_ACCESS_PHY_CTRL_1) & ((0x1f << 15) | 0x2);
-	v = reg << 20 | page << 3;
-	sw_w32(v | park_page, RTL838X_SMI_ACCESS_PHY_CTRL_1);
-	sw_w32_mask(0, 1, RTL838X_SMI_ACCESS_PHY_CTRL_1);
-
-	rtl838x_phy_wait_op(10000);
-
-	*val = sw_r32(RTL838X_SMI_ACCESS_PHY_CTRL_2) & 0xffff;
-//	printk("PHY-read: port %d reg: %x res: %x\n", port, reg, *val);
-	return 0;
-}
 
 int dsa_phy_read(struct dsa_switch *ds, int phy_addr, int phy_reg)
 {
 	u32 val;
 	u32 offset = 0;
-	struct rtl838x_priv *priv = ds->priv;
+	struct rtl838x_switch_priv *priv = ds->priv;
 
 	if (phy_addr >= 24 && phy_addr <= 27 
 	     && priv->ports[24].phy == PHY_RTL838X_SDS) {
@@ -229,7 +268,7 @@ int dsa_phy_read(struct dsa_switch *ds, int phy_addr, int phy_reg)
 int dsa_phy_write(struct dsa_switch *ds, int phy_addr, int phy_reg, u16 val)
 {
 	u32 offset = 0;
-	struct rtl838x_priv *priv = ds->priv;
+	struct rtl838x_switch_priv *priv = ds->priv;
 	
 	if (phy_addr >= 24 && phy_addr <= 27 
 	     && priv->ports[24].phy == PHY_RTL838X_SDS) {
@@ -242,491 +281,26 @@ int dsa_phy_write(struct dsa_switch *ds, int phy_addr, int phy_reg, u16 val)
 	return rtl838x_write_phy(phy_addr, 0, phy_reg, val);
 }
 
-u32 rtl838x_6275B_intPhy_perport[][2] = {
-	{0x1f, 0x0b82}, {0x10, 0x0000},
-	{0x1f, 0x0a44}, {0x11, 0x0418}, {0x1f, 0x0bc0}, {0x16, 0x0c00},
-	{0x1f, 0x0000}, {0x1b, 0x809a}, {0x1c, 0x8933}, {0x1b, 0x80a3},
-	{0x1c, 0x9233}, {0x1b, 0x80ac}, {0x1c, 0xa444}, {0x1b, 0x809f},
-	{0x1c, 0x6b20}, {0x1b, 0x80a8}, {0x1c, 0x6b22}, {0x1b, 0x80b1},
-	{0x1c, 0x6b23}, {0, 0}
-};
-
-u32 rtl8218b_6276B_hwEsd_perport[][2] = {
-    {0x1f, 0xbc4}, {0x17, 0xa200}, {0, 0}
-};
-
-static void rtl8380_int_phy_toggle(int mac, bool on)
+static int rtl838x_mdio_read(struct mii_bus *bus, int addr, int regnum)
 {
-	u32 val;
-	rtl838x_read_phy(mac, 0, 0, &val);
-	if (on)
-		rtl838x_write_phy(mac, 0, 0, val & ~(1 << 11));
-	else 
-		rtl838x_write_phy(mac, 0, 0, val | (1 << 11));
+	int ret;
+	
+	struct rtl838x_switch_priv *priv = bus->priv;
+//	printk("switch rtl838x_mdio_read %d %d\n", addr, regnum);
+	ret = dsa_phy_read(priv->ds, addr, regnum);
+//	printk("switch rtl838x_mdio_read %d\n", ret);
+	return ret;
 }
 
-static void rtl8380_rtl8214fc_toggle(int mac, bool on)
+static int rtl838x_mdio_write(struct mii_bus *bus, int addr, int regnum,
+				 u16 val)
 {
-	u32 val;
-	/* fiber ports */
-	rtl838x_write_phy(mac, 4095, 30, 3);
-	rtl838x_read_phy(mac, 0, 16, &val);
-	if (on)
-		rtl838x_write_phy(mac, 0, 16, val & ~(1 << 11));
-	else 
-		rtl838x_write_phy(mac, 0, 16, val | (1 << 11));
-	
-	/* copper ports */
-	rtl838x_write_phy(mac, 4095, 30, 1);
-	rtl838x_read_phy(mac, 0, 16, &val);
-	if (on)
-		rtl838x_write_phy(mac, 0xa40, 16, val & ~(1 << 11));
-	else 
-		rtl838x_write_phy(mac, 0xa40, 16, val | (1 << 11));
+	struct rtl838x_switch_priv *priv = bus->priv;
+	return dsa_phy_write(priv->ds, addr, regnum, val);
 }
 
-static void rtl8380_phy_reset(int mac)
-{
-	u32  val;
-	rtl838x_read_phy(mac, 0, 0, &val);
-	rtl838x_write_phy(mac, 0, 0, val | (0x1 << 15));
-}
 
-void rtl8380_sds_rst(int mac)
-{
-	u32 offset = (mac == 24)? 0: 0x100;
-	sw_w32_mask(1 << 11, 0, (volatile void *) (0xbb00f800 + offset));
-	sw_w32_mask(0x3, 0, RTL838X_SDS4_REG28 + offset);
-	sw_w32_mask(0x3, 0x3, RTL838X_SDS4_REG28 + offset);
-	sw_w32_mask(0, 0x1 << 6, RTL838X_SDS4_DUMMY0 + offset);
-	sw_w32_mask(0x1 << 6, 0, RTL838X_SDS4_DUMMY0 + offset);
-}
-
-int rtl8380_sds_power(int mac, int val)
-{
-	u32 mode = (val == 1)? 0x4: 0x9;
-	u32 offset = (mac == 24)? 5: 0;
-
-	if ( (mac != 24) && (mac != 26) ) {
-		printk("rtl8380_sds_power: not a fibre port: %d\n", mac);
-		return -1;
-	}
-
-	sw_w32_mask(0x1f << offset, mode << offset, RTL838X_SDS_MODE_SEL);
-
-	rtl8380_sds_rst(mac);
-
-	return 0;
-}
-
-static int rtl8380_configure_int_rtl8218b(int mac)
-{
-	u32 val;
-	int i, p, ipd_flag;
-
-	rtl838x_read_phy(mac, 0, 3, &val);
-	printk("Phy on MAC %d: %x\n", mac, val);
-	rtl838x_write_phy(mac, 31, 27, 0x0002);
-	rtl838x_read_phy(mac, 31, 28, &val);
-	printk("PHY ID: %x\n", val);
-	
-	if (val != 0x6275 ) {
-		pr_err("Expected internal RTL8218B, found PHY-ID %x", val);
-		return -1;
-	}
-	
-	/* Internal RTL8218B, version 2 */
-	printk("Found internal RTL8218B\n");
-	if( sw_r32(RTL838X_DMY_REG31) == 0x1 )
-		ipd_flag = 1;
-	printk("IPD: %d\n", ipd_flag);
-	rtl838x_read_phy(mac, 0, 0, &val);
-	printk("PHY status: %4x\n", val);
-	if ( val & (1 << 11) ) {
-		printk("Enabling PHY %d\n", mac);
-		rtl8380_int_phy_toggle(mac, true);
-	} else {
-		printk("Resetting PHY %d\n", mac);
-		rtl8380_phy_reset(mac);
-		msleep(100);
-	}
-	/* Ready PHY for patch */
-	for (p = 0; p < 8; p++) {
-		rtl838x_write_phy(mac + p, 0xfff, 0x1f, 0x0b82);
-		rtl838x_write_phy(mac + p, 0xfff, 0x10, 0x0010);
-	}
-	msleep(500);
-	for (p = 0; p < 8; p++) {
-		for (i = 0; i < 100 ; i++) {
-			rtl838x_read_phy(mac + p, 0x0b80, 0x10, &val);
-			if (val & 0x40) break;
-		}
-		if (i >= 100) {
-			printk("ERROR: Port %d not ready for patch.\n", p);
-			return -1;
-		}
-	}
-	for (p = 0; p < 8; p++) {
-		i = 0;
-		while (rtl838x_6275B_intPhy_perport[i][0]) {
-			rtl838x_write_phy(mac + p, 0xfff,
-				rtl838x_6275B_intPhy_perport[i][0],
-				rtl838x_6275B_intPhy_perport[i][1]);
-			i++;
-		}
-		while (rtl8218b_6276B_hwEsd_perport[i][0]) {
-			rtl838x_write_phy(mac + p, 0xfff,
-				rtl8218b_6276B_hwEsd_perport[i][0],
-				rtl8218b_6276B_hwEsd_perport[i][1]);
-			i++;
-		}
-	}
-	printk("PHY %d successfully patched\n", mac);
-	return 0;
-}
-
-u32 rtl8380_rtl8218b_perchip[][3] = {
-	{0, 0x1f, 0x0000}, {0, 0x1e, 0x0008}, {0, 0x1f, 0x0405},
-	{0, 0x14, 0x08ec}, {0, 0x1f, 0x0404}, {0, 0x17, 0x5359},
-	{0, 0x1f, 0x0424}, {0, 0x17, 0x5359}, {0, 0x1f, 0x042c},
-	{0, 0x11, 0x4000}, {0, 0x12, 0x2020}, {0, 0x17, 0x34ac},
-	{0, 0x1f, 0x042d}, {0, 0x12, 0x6078}, {0, 0x1f, 0x042e},
-	{0, 0x11, 0x2189}, {0, 0x1f, 0x0460}, {0, 0x10, 0x4800},
-	{0, 0x1f, 0x0464}, {0, 0x12, 0x1fb0}, {0, 0x13, 0x3e0f},
-	{0, 0x15, 0x202a}, {0, 0x16, 0xf072}, {0, 0x1f, 0x0465},
-	{0, 0x10, 0x4208}, {0, 0x11, 0x3a08}, {0, 0x13, 0x8068},
-	{0, 0x15, 0x29fb}, {0, 0x12, 0x4007}, {0, 0x14, 0x619f},
-	{0, 0x1f, 0x0462}, {0, 0x10, 0xf206}, {0, 0x13, 0x530f},
-	{0, 0x15, 0x2a58}, {0, 0x12, 0x97b3}, {0, 0x1f, 0x0464},
-	{0, 0x17, 0x80f5}, {0, 0x17, 0x00f5}, {0, 0x1f, 0x042d},
-	{0, 0x11, 0xc015}, {0, 0x11, 0xc014}, {0, 0x1f, 0x0467},
-	{0, 0x14, 0x143d}, {0, 0x14, 0x3c15}, {0, 0x14, 0x3c17},
-	{0, 0x14, 0x0000}, {0, 0x1f, 0x0404}, {0, 0x13, 0x7146},
-	{0, 0x13, 0x7106}, {0, 0x1f, 0x0424}, {0, 0x13, 0x7146},
-	{0, 0x13, 0x7106}, {0, 0x1f, 0x0261}, {0, 0x10, 0x6000},
-	{0, 0x10, 0x0000}, {0, 0x1f, 0x0a42}, {0, 0x1e, 0x0000},
-	{0, 0, 0}
-};
-
-
-u32 rtl8218B_6276B_rtl8380_perport[][2] = {
-	{0x1f, 0x0b82}, {0x10, 0x0000}, {0x1f, 0x0a44}, {0x11, 0x0418},
-	{0x1f, 0x0bc0}, {0x16, 0x0c00}, {0x1f, 0x0000}, {0x1b, 0x809a},
-	{0x1c, 0x8933}, {0x1b, 0x80a3}, {0x1c, 0x9233}, {0x1b, 0x80ac},
-	{0x1c, 0xa444}, {0x1b, 0x809f}, {0x1c, 0x6b20}, {0x1b, 0x80a8},
-	{0x1c, 0x6b22}, {0x1b, 0x80b1}, {0x1c, 0x6b23}, {0, 0}
-};
-
-u32 rtl8380_rtl8218b_perport[][2] = {
-	{0x1f, 0x0b82},{0x10, 0x0000}, {0x1f, 0x0a44},{0x11, 0x0418},
-	{0x1f, 0x0bc0},{0x16, 0x0c00}, {0x1f, 0x0000},{0x1b, 0x809a},
-	{0x1c, 0xa444},{0x1b, 0x80a3}, {0x1c, 0xa444},{0x1b, 0x80ac},
-	{0x1c, 0xa444},{0x1b, 0x809f}, {0x1c, 0x6b20},{0x1b, 0x80a8},
-	{0x1c, 0x6b24},{0x1b, 0x80b1}, {0x1c, 0x6b24},{0x1b, 0x8012},
-	{0x1c, 0xffff},{0x1b, 0x81bd}, {0x1c, 0x2801},{0x1b, 0x8100},
-	{0x1c, 0xe91e},{0x1b, 0x811f}, {0x1c, 0xe90e},{0x1b, 0x827b},
-	{0x1c, 0x0000},{0x1f, 0x0bc4}, {0x17, 0xb200}, {0, 0}
-};
-
-static int rtl8380_configure_ext_rtl8218b(int mac)
-{
-	u32 val, ipd;
-	int i, l;
-	
-	if (mac != 0 && mac != 16) {
-		pr_err("External RTL8218B must have PHY-IDs 0 or 16!");
-		return -1;
-	}
-	rtl838x_read_phy(mac, 0, 3, &val);
-	printk("Phy on MAC %d: %x\n", mac, val);
-	rtl838x_write_phy(mac, 31, 27, 0x0002);
-	rtl838x_read_phy(mac, 31, 28, &val);
-	printk("PHY ID: %x\n", val);
-	if (val != 0x6276) {
-		pr_err("Expected external RTL8218B, found PHY-ID %x", val);
-		return -1;
-	}
-	printk("Found external RTL8218B\n");
-	rtl838x_read_phy(mac, 0, 0, &val);
-	printk("PHY status: %4x\n", val);
-	if ( val & (1 << 11) ) {
-		printk("Enabling PHY %d\n", mac);
-		rtl8380_int_phy_toggle(mac, true);
-	} else {
-		printk("Resetting PHY %d\n", mac);
-		rtl8380_phy_reset(mac);
-	}
-	msleep(100);
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0);
-	rtl838x_write_phy(mac,  0xfff, 0x1b, 0x4);
-	rtl838x_read_phy(mac, 0xfff, 0x1c, &val);
-	printk("Chip revision: %x", val);
-
-	i = 0;
-	while (rtl8380_rtl8218b_perchip[i][0] 
-		&& rtl8380_rtl8218b_perchip[i][1]) {
-		rtl838x_write_phy(mac + rtl8380_rtl8218b_perchip[i][0],
-					  0xfff, rtl8380_rtl8218b_perchip[i][1],
-					  rtl8380_rtl8218b_perchip[i][2]);
-		i++;
-	}
-
-	/* Enable PHY */
-	for (i=0; i < 8; i++) {
-		rtl838x_write_phy(mac + i, 0xfff, 0x1f, 0x0000);
-		rtl838x_write_phy(mac + i, 0xfff, 0x00, 0x1140);
-	}
-	mdelay(100);
-
-	/* Request patch */
-	for (i = 0; i < 8; i++) {
-		rtl838x_write_phy(mac + i,  0xfff, 0x1f, 0x0b82);
-		rtl838x_write_phy(mac + i,  0xfff, 0x10, 0x0010);
-	}
-	mdelay(300);
-
-	/* Verify patch readiness */
-	for (i = 0; i < 8; i++) {
-		for (l=0; l< 100; l++) {
-			rtl838x_read_phy(mac + i, 0xb80, 0x10, &val);
-			if (val & 0x40)
-				break;
-		}
-		if (l >= 100) {
-			pr_err("Could not patch PHY, port %d\n", mac + i);
-			return -1;
-		}
-	}
-
-	/* Use Broadcast ID method for patching */
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0000);
-	rtl838x_write_phy(mac, 0xfff, 0x1d, 0x0008);
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0266);
-	rtl838x_write_phy(mac, 0xfff, 0x16, 0xff00 + mac);
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0000);
-	rtl838x_write_phy(mac, 0xfff, 0x1d, 0x0000);
-	mdelay(1);
-	
-	rtl838x_write_phy(mac, 0xfff, 30, 8);
-	rtl838x_write_phy(mac, 0x26e, 17, 0xb);
-	rtl838x_write_phy(mac, 0x26e, 16, 0x2);
-	mdelay(1);
-	rtl838x_read_phy(mac, 0x26e, 19, &ipd);
-	rtl838x_write_phy(mac, 0, 30, 0);
-	ipd = (ipd >> 4) & 0xf;
-	printk("IPD-flag: %d", ipd);
-	
-	i = 0;
-	while (rtl8218B_6276B_rtl8380_perport[i][0]) {
-		rtl838x_write_phy(mac, 0xfff, rtl8218B_6276B_rtl8380_perport[i][0],
-				  rtl8218B_6276B_rtl8380_perport[i][1]);
-		i++;
-	}
-		
-	/*Disable broadcast ID*/
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0000);
-	rtl838x_write_phy(mac, 0xfff, 0x1d, 0x0008);
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0266);
-	rtl838x_write_phy(mac, 0xfff, 0x16, 0x00 + mac);
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0000);
-	rtl838x_write_phy(mac, 0xfff, 0x1d, 0x0000);
-	mdelay(1);
-	
-	printk("PHY %d successfully patched\n", mac);
-	return 0;
-}
-
-static u32 rtl8380_rtl8214fc_perchip[][3] = {
-	/* Values are PHY, Register, Value */
-	{0, 0x1e, 0x0008}, {0, 0x1f, 0x0405}, {0, 0x14, 0x08ec},
-	{0, 0x1f, 0x0404}, {0, 0x17, 0x5359}, {0, 0x1f, 0x0424},
-	{0, 0x17, 0x5359}, {0, 0x1f, 0x042c}, {0, 0x11, 0x4000},
-	{0, 0x12, 0x2020}, {0, 0x17, 0x34ac}, {0, 0x1f, 0x042d},
-	{0, 0x12, 0x6078}, {0, 0x1f, 0x042e}, {0, 0x11, 0x2189},
-	{0, 0x1f, 0x0460}, {0, 0x10, 0x4800}, {0, 0x1f, 0x0464},
-	{0, 0x12, 0x1fb0}, {0, 0x13, 0x3e0f}, {0, 0x15, 0x202a},
-	{0, 0x16, 0xf072}, {0, 0x1f, 0x0465}, {0, 0x10, 0x4208},
-	{0, 0x11, 0x3a08}, {0, 0x13, 0x8068}, {0, 0x15, 0x29fb},
-	{0, 0x12, 0x4007}, {0, 0x14, 0x619f}, {0, 0x1f, 0x0462},
-	{0, 0x10, 0xf206}, {0, 0x13, 0x530f}, {0, 0x15, 0x2a58},
-	{0, 0x12, 0x97b3}, {0, 0x1f, 0x0464}, {0, 0x17, 0x80f5},
-	{0, 0x17, 0x00f5}, {0, 0x1f, 0x042d}, {0, 0x11, 0xc015},
-	{0, 0x11, 0xc014}, {0, 0x1f, 0x0467}, {0, 0x14, 0x143d},
-	{0, 0x14, 0x3c15}, {0, 0x14, 0x3c17}, {0, 0x14, 0x0000},
-	{0, 0x1f, 0x0404}, {0, 0x13, 0x7146}, {0, 0x13, 0x7106},
-	{0, 0x1f, 0x0424}, {0, 0x13, 0x7146}, {0, 0x13, 0x7106},
-	{0, 0x1f, 0x0261}, {0, 0x10, 0x6000}, {0, 0x10, 0x0000},
-	{0, 0x1f, 0x0260}, {0, 0x13, 0x5820}, {0, 0x14, 0x032c},
-	{0, 0x1f, 0x0280}, {0, 0x10, 0xf0bb}, {0, 0x1f, 0x0266},
-	{0, 0x10, 0x0f95}, {0, 0x13, 0x0f95}, {0, 0x14, 0x0f95},
-	{0, 0x15, 0x0f95}, {0, 0x1f, 0x0a42}, {0, 0x1e, 0x0000},
-	{0, 0x1e, 0x0003}, {0, 0x1f, 0x0008}, {0, 0x17, 0x5359},
-	{0, 0x14, 0x974d}, {0, 0x1e, 0x0000}, {1, 0x1e, 0x0003},
-	{1, 0x1f, 0x0008}, {1, 0x17, 0x5359}, {1, 0x14, 0x974d},
-	{1, 0x1e, 0x0000}, {2, 0x1e, 0x0003}, {2, 0x1f, 0x0008},
-	{2, 0x17, 0x5359}, {2, 0x14, 0x974d}, {2, 0x1e, 0x0000},
-	{3, 0x1e, 0x0003}, {3, 0x1f, 0x0008}, {3, 0x17, 0x5359},
-	{3, 0x14, 0x974d}, {3, 0x1e, 0x0000}, {0, 0x1e, 0x0001},
-	{1, 0x1e, 0x0001}, {2, 0x1e, 0x0001}, {3, 0x1e, 0x0001},
-	{0, 0x00, 0x1340}, {1, 0x00, 0x1340}, {2, 0x00, 0x1340},
-	{3, 0x00, 0x1340}, {0, 0x1e, 0x0003}, {1, 0x1e, 0x0003},
-	{2, 0x1e, 0x0003}, {3, 0x1e, 0x0003}, {0, 0x1f, 0x0000},
-	{1, 0x1f, 0x0000}, {2, 0x1f, 0x0000}, {3, 0x1f, 0x0000},
-	{0, 0x10, 0x1340}, {1, 0x10, 0x1340}, {2, 0x10, 0x1340},
-	{3, 0x10, 0x1340}, {0, 0x1e, 0x0000}, {1, 0x1e, 0x0000},
-	{2, 0x1e, 0x0000}, {3, 0x1e, 0x0000}, {0, 0x1f, 0x0a42},
-	{1, 0x1f, 0x0a42}, {2, 0x1f, 0x0a42}, {3, 0x1f, 0x0a42},
-	{0, 0, 0}
-};
-
-static u32 rtl8380_rtl8214fc_perport[][2] = {
-	{0x1f, 0x0b82}, {0x10, 0x0000}, {0x1f, 0x0a44}, {0x11, 0x0418},
-	{0x1f, 0x0bc0}, {0x16, 0x0c00}, {0x1f, 0x0a43}, {0x11, 0x0043},
-	{0x1f, 0x0000}, {0x1b, 0x809a}, {0x1c, 0x8933}, {0x1b, 0x80a3},
-	{0x1c, 0x9233}, {0x1b, 0x80ac}, {0x1c, 0xa444}, {0x1b, 0x809f},
-	{0x1c, 0x6b20}, {0x1b, 0x80a8}, {0x1c, 0x6b22}, {0x1b, 0x80b1},
-	{0x1c, 0x6b23}, {0x1f, 0x0000}, {0x1e, 0x0003}, {0x1f, 0x0003},
-	{0x15, 0xe47f}, {0x1f, 0x0009}, {0x15, 0x46f4}, {0x1f, 0x0000}, 
-	{0x1e, 0x0000}, {0, 0}
-};
-
-static int rtl8380_configure_rtl8214fc(int mac)
-{
-	u32 val, page = 0;
-	int i,l;
-	
-	rtl838x_read_phy(mac, 0, 3, &val);
-	printk("Phy on MAC %d: %x\n", mac, val);
-	rtl838x_write_phy(mac, 0, 30, 0x0001);
-	rtl838x_write_phy(mac, 0, 31, 0x0a42);
-	rtl838x_write_phy(mac, 31, 27, 0x0002);
-	rtl838x_read_phy(mac, 31, 28, &val);
-	printk("PHY ID: %x\n", val);
-	if (val != 0x6276 ) {
-		pr_err("Expected external RTL8214FC, found PHY-ID %x", val);
-		return -1;
-	}
-	
-	rtl838x_write_phy(mac, 0xfff, 27, 0x0004);
-	rtl838x_read_phy(mac, 0xfff, 28, &val);
-	printk("Version: %d\n", val);
-	
-	rtl838x_read_phy(mac, 0, 16, &val);
-	printk("PHY status: %4x\n", val);
-	if ( val & (1 << 11) ) {
-		printk("Enabling PHY %d\n", mac);
-		rtl8380_rtl8214fc_toggle(mac, true);
-	} else {
-		printk("Resetting PHY %d\n", mac);
-		rtl8380_phy_reset(mac);
-	}
-	msleep(100);
-	rtl838x_write_phy(mac, 0, 30, 0x0001);
-
-	i = 0;
-	while (rtl8380_rtl8214fc_perchip[i][0] 
-		&& rtl8380_rtl8214fc_perchip[i][1]) {
-		
-		if (rtl8380_rtl8214fc_perchip[i][1] == 0x1f)
-			page = rtl8380_rtl8214fc_perchip[i][2];
-		if (rtl8380_rtl8214fc_perchip[i][1] == 0x13 && page == 0x260) {
-			rtl838x_read_phy(mac + rtl8380_rtl8214fc_perchip[i][0],
-					 0x260, 13, &val);
-			val = (val & 0x1f00) | (rtl8380_rtl8214fc_perchip[i][2]
-				& 0xe0ff);
-			rtl838x_write_phy(mac + rtl8380_rtl8214fc_perchip[i][0],
-					  0xfff, rtl8380_rtl8214fc_perchip[i][1],
-					  val);
-		} else {
-			rtl838x_write_phy(mac + rtl8380_rtl8214fc_perchip[i][0],
-					  0xfff, rtl8380_rtl8214fc_perchip[i][1],
-					  rtl8380_rtl8214fc_perchip[i][2]);
-		}
-		i++;
-	}
-	
-	/* Force copper medium */
-	for (i=0; i < 4; i++) {
-		rtl838x_write_phy(mac + i, 0xfff, 0x1f, 0x0000);
-		rtl838x_write_phy(mac + i, 0xfff, 0x1e, 0x0001);
-	}
-	
-	/* Enable PHY */
-	for (i=0; i < 4; i++) {
-		rtl838x_write_phy(mac + i, 0xfff, 0x1f, 0x0000);
-		rtl838x_write_phy(mac + i, 0xfff, 0x00, 0x1140);
-	}
-	mdelay(100);
-
-	/* Disable Autosensing */
-	for (i = 0; i < 4; i++) {
-		for (l = 0; l< 100; l++) {
-			rtl838x_read_phy(mac + i, 0x0a42, 0x10, &val);
-			if ((val & 0x7) >= 3)
-				break;
-		}
-		if (l >= 100) {
-			pr_err("Could not disable autosensing\n");
-			return -1;
-		}
-	}
-	
-	/* Request patch */
-	for (i = 0; i < 4; i++) {
-		rtl838x_write_phy(mac + i,  0xfff, 0x1f, 0x0b82);
-		rtl838x_write_phy(mac + i,  0xfff, 0x10, 0x0010);
-	}
-	mdelay(300);
-	
-	/* Verify patch readiness */
-	for (i = 0; i < 4; i++) {
-		for (l=0; l< 100; l++) {
-			rtl838x_read_phy(mac + i, 0xb80, 0x10, &val);
-			if (val & 0x40)
-				break;
-		}
-		if (l >= 100) {
-			pr_err("Could not patch PHY\n");
-			return -1;
-		}
-	}
-
-	/* Use Broadcast ID method for patching */
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0000);
-	rtl838x_write_phy(mac, 0xfff, 0x1d, 0x0008);
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0266);
-	rtl838x_write_phy(mac, 0xfff, 0x16, 0xff00 + mac);
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0000);
-	rtl838x_write_phy(mac, 0xfff, 0x1d, 0x0000);
-	mdelay(1);
-
-	i = 0;
-	while (rtl8380_rtl8214fc_perport[i][0]) {
-		rtl838x_write_phy(mac, 0xfff,rtl8380_rtl8214fc_perport[i][0],
-				  rtl8380_rtl8214fc_perport[i][1]);
-		i++;
-	}
-	
-	/*Disable broadcast ID*/
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0000);
-	rtl838x_write_phy(mac, 0xfff, 0x1d, 0x0008);
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0266);
-	rtl838x_write_phy(mac, 0xfff, 0x16, 0x00 + mac);
-	rtl838x_write_phy(mac, 0xfff, 0x1f, 0x0000);
-	rtl838x_write_phy(mac, 0xfff, 0x1d, 0x0000);
-	mdelay(1);
-
-	/* Auto medium selection */
-	for (i=0; i < 4; i++) {
-		rtl838x_write_phy(mac + i, 0xfff, 0x1f, 0x0000);
-		rtl838x_write_phy(mac + i, 0xfff, 0x1e, 0x0000);
-	}
-	pr_info("PHY_RTL8214FC setup done.\n");
-	
-	return 0;
-}
-
-static int rtl8380_enable_phy_polling(struct rtl838x_priv *priv)
+static int rtl8380_enable_phy_polling(struct rtl838x_switch_priv *priv)
 {
 	int i;
 	u32 v = 0;
@@ -738,192 +312,12 @@ static int rtl8380_enable_phy_polling(struct rtl838x_priv *priv)
 	}
 	printk("rtl8300_enable_phy_polling: %8x\n", v);
 	
-	/* Enable 2 QSGMII ports and 8 GIG ports: */
-//	v = 0x3000000 | 0x0000FF00;
 	sw_w32(v, RTL838X_SMI_POLL_CTRL);
 	/* PHY update complete */
 	sw_w32_mask(0, 0x8000, RTL838X_SMI_GLB_CTRL);
 	return 0;
 }
 
-static u32 rtl8380_sds_take_reset[][2] = {
-	{0xbb000034, 0x0000003f}, {0xbb00003c, 0x00000010}, {0xbb00e78c, 0x00007146},
-	{0xbb00e98c, 0x00007146}, {0xbb00eb8c, 0x00007146}, {0xbb00ed8c, 0x00007146},
-	{0xbb00ef8c, 0x00007146}, {0xbb00f18c, 0x00007146}, {0, 0}
-};
-
-static u32 rtl8380_sds_common[][2] = {
-	{0xbb00f878, 0x0000071e}, {0xbb00f978, 0x0000071e}, {0xbb00e784, 0x00000F00},
-	{0xbb00e984, 0x00000F00}, {0xbb00eb84, 0x00000F00}, {0xbb00ed84, 0x00000F00},
-	{0xbb00ef84, 0x00000F00}, {0xbb00f184, 0x00000F00}, {0xbb00e788, 0x00007060},
-	{0xbb00e988, 0x00007060}, {0xbb00eb88, 0x00007060}, {0xbb00ed88, 0x00007060},
-	{0xbb00ef88, 0x00007060}, {0xbb00f188, 0x00007060}, {0xbb00ef90, 0x0000074d},
-	{0xbb00f190, 0x0000074d}, {0, 0}
-};
-
-static u32 rtl8380_sds01_qsgmii_6275b[][2] = {
-	{0xbb00f38c, 0x0000f46f}, {0xbb00f388, 0x000085fa}, {0xbb00f488, 0x000085fa},
-	{0xbb00f398, 0x000020d8}, {0xbb00f498, 0x000020d8}, {0xbb00f3c4, 0x0000B7C9},
-	{0xbb00f4ac, 0x00000482}, {0xbb00f4a8, 0x000080c7}, {0xbb00f3c8, 0x0000ab8e},
-	{0xbb00f3ac, 0x00000482}, {0xbb00f3cc, 
-		/* External RTL8214FC */0x000024ab}, {0xbb00f4c4, 0x00004208},
-	{0xbb00f4c8, 0x0000c208}, {0xbb00f464, 0x00000303}, {0xbb00f564, 0x00000303},
-	{0xbb00f3b8, 0x0000FCC2}, {0xbb00f4b8, 0x0000FCC2}, {0xbb00f3a4, 0x00008e64},
-	{0xbb00f3a4, 0x00008c64}, {0xbb00f4a4, 0x00008e64}, {0xbb00f4a4, 0x00008c64},
-	{0, 0}
-  };
-
-static u32 rtl8380_sds23_qsgmii_6275b[][2] = {
-	{0xbb00f58c, 0x0000f46d}, {0xbb00f588, 0x000085fa}, {0xbb00f688, 0x000085fa},
-	{0xbb00f788, 0x000085fa}, {0xbb00f598, 0x000020d8}, {0xbb00f698, 0x000020d8},
-	{0xbb00f5c4, 0x0000B7C9}, {0xbb00f5c8, 0x0000ab8e}, {0xbb00f5ac, 0x00000482},
-	{0xbb00f6ac, 0x00000482}, {0xbb00f5cc, 0x000024ab}, {0xbb00f6c4, 0x00004208},
-	{0xbb00f6c8, 0x0000c208}, {0xbb00f664, 0x00000303}, {0xbb00f764, 0x00000303},
-	{0xbb00f5b8, 0x0000FCC2}, {0xbb00f6b8, 0x0000FCC2}, {0xbb00f5a4, 0x00008e64},
-	{0xbb00f5a4, 0x00008c64}, {0xbb00f6a4, 0x00008e64}, {0xbb00f6a4, 0x00008c64},
-	{0, 0}
- };
-
-static u32 rtl8380_sds4_fiber_6275b[][2] = {
-	{0xbb00f788, 0x000085fa}, {0xbb00f7ac, 0x00001482}, {0xbb00f798, 0x000020d8},
-	{0xbb00f7a8, 0x000000c3}, {0xbb00f7c4, 0x0000B7C9}, {0xbb00f7c8, 0x0000ab8e},
-	{0xbb00f864, 0x00000303}, {0xbb00f7b8, 0x0000FCC2}, {0xbb00f7a4, 0x00008e64},
-	{0xbb00f7a4, 0x00008c64}, {0, 0}
-};
-
-static u32 rtl8380_sds5_fiber_6275b[][2] = {
-	{0xbb00f888, 0x000085fa}, {0xbb00f88c, 0x00000000}, {0xbb00f890, 0x0000dccc},
-	{0xbb00f894, 0x00000000}, {0xbb00f898, 0x00003600}, {0xbb00f89c, 0x00000003},
-	{0xbb00f8a0, 0x000079aa}, {0xbb00f8a4, 0x00008c64}, {0xbb00f8a8, 0x000000c3},
-	{0xbb00f8ac, 0x00001482}, {0xbb00f960, 0x000014aa}, {0xbb00f964, 0x00000303},
-	{0xbb00f8b8, 0x0000f002}, {0xbb00f96c, 0x000004bf}, {0xbb00f8a4, 0x00008e64},
-	{0xbb00f8a4, 0x00008c64}, {0, 0}
-};
-
-static u32 rtl8380_sds_reset[][2] = {
-	{0xbb00e780, 0x00000c00}, {0xbb00e980, 0x00000c00}, {0xbb00eb80, 0x00000c00},
-	{0xbb00ed80, 0x00000c00}, {0xbb00ef80, 0x00000c00}, {0xbb00f180, 0x00000c00},
-	{0xbb00e780, 0x00000c03}, {0xbb00e980, 0x00000c03}, {0xbb00eb80, 0x00000c03},
-	{0xbb00ed80, 0x00000c03}, {0xbb00ef80, 0x00000c03}, {0xbb00f180, 0x00000c03},
-	{0, 0}
-};
-
-static u32 rtl8380_sds_release_reset[][2] = {
-	{0xbb00e78c, 0x00007106}, {0xbb00e98c, 0x00007106}, {0xbb00eb8c, 0x00007106},
-	{0xbb00ed8c, 0x00007106}, {0xbb00ef8c, 0x00007106}, {0xbb00f18c, 0x00007106},
-	{0, 0}
-};
-
-static void rtl8380_configure_serdes(void)
-{
-	u32 v;
-	u32 sds_conf_value;
-	int i;
-
-	/* Back up serdes power down value */
-	sds_conf_value = sw_r32(RTL838X_SDS_CFG_REG);
-	printk("SDS power down value: %x\n", sds_conf_value);
-
-	/* take serdes into reset */
-	i = 0;
-	while (rtl8380_sds_take_reset[i][0]) {
-		sw_w32(rtl8380_sds_take_reset[i][1], 
-			(volatile void *)rtl8380_sds_take_reset[i][0]);
-		i++;
-		udelay(1000);
-	}
-	
-	/* apply common serdes patch */
-	i = 0;
-	while (rtl8380_sds_common[i][0]) {
-		sw_w32(rtl8380_sds_common[i][1],
-			(volatile void *)rtl8380_sds_common[i][0]);
-		i++;
-		udelay(1000);
-	}
-	
-	/* internal R/W enable */
-	sw_w32(3, RTL838X_INT_RW_CTRL);
-	
-	/* SerDes ports 4 and 5 are FIBRE ports */
-	sw_w32_mask(0x7 | 0x38, 1 | (1 << 3), RTL838X_INT_MODE_CTRL);
-
-	/* SerDes module settings, SerDes 0-3 are QSGMII */
-	v = 0x6 << 25 | 0x6 << 20 | 0x6 << 15 | 0x6 << 10;
-	/* SerDes 4 and 5 are 1000BX FIBRE */
-	v |= 0x4 << 5 | 0x4 ;
-	sw_w32(v, RTL838X_SDS_MODE_SEL);
-
-	printk("PLL control register: %x\n", sw_r32(RTL838X_PLL_CML_CTRL));
-	sw_w32_mask(0xfffffff0, 0xaaaaaaaf & 0xf, RTL838X_PLL_CML_CTRL);
-	i = 0;
-	while (rtl8380_sds01_qsgmii_6275b[i][0]) {
-		sw_w32(rtl8380_sds01_qsgmii_6275b[i][1],
-			(volatile void *) rtl8380_sds01_qsgmii_6275b[i][0]);
-		i++;
-	}
-	
-	i = 0;
-	while (rtl8380_sds23_qsgmii_6275b[i][0]) {
-		sw_w32(rtl8380_sds23_qsgmii_6275b[i][1],
-			(volatile void *) rtl8380_sds23_qsgmii_6275b[i][0]);
-		i++;
-	}
-	
-	i = 0;
-	while (rtl8380_sds4_fiber_6275b[i][0]) {
-		sw_w32(rtl8380_sds4_fiber_6275b[i][1],
-			(volatile void *) rtl8380_sds4_fiber_6275b[i][0]);
-		i++;
-	}
-	
-	i = 0;
-	while (rtl8380_sds5_fiber_6275b[i][0]) {
-		sw_w32(rtl8380_sds5_fiber_6275b[i][1],
-			(volatile void *) rtl8380_sds5_fiber_6275b[i][0]);
-		i++;
-	}
-	
-	i = 0;
-	while (rtl8380_sds_reset[i][0]) {
-		sw_w32(rtl8380_sds_reset[i][1],
-			(volatile void *) rtl8380_sds_reset[i][0]);
-		i++;
-	}
-	
-	i = 0;
-	while (rtl8380_sds_release_reset[i][0]) {
-		sw_w32(rtl8380_sds_release_reset[i][1],
-			(volatile void *) rtl8380_sds_release_reset[i][0]);
-		i++;
-	}
-
-	printk("SDS power down value now: %x\n", sw_r32(RTL838X_SDS_CFG_REG));
-	sw_w32(sds_conf_value, RTL838X_SDS_CFG_REG);
-	
-	/* Fibre port power off, in order to disable LEDs */
-/*	sw_w32_mask( 0, 1 << 11, (volatile void *)0xbb00f800); 
-	sw_w32_mask( 0, 1 << 11, (volatile void *)0xbb00f900);*/
-	
-}
-
-static int rtl8380_configure_mac(struct rtl838x_priv *priv)
-{
-	int i;
-	/* fix timer for EEE */
-	sw_w32(0x5001411, (volatile void *)0xbb00AA04);
-	sw_w32(0x5001417, (volatile void *)0xbb00AA08);
-	
-	if (priv->id == 0x8382) {
-		for (i = 0; i <= 28; i++)
-			sw_w32(0, (volatile void *)0xBB00d57c + i * 0x80);
-	}
-	if (priv->id == 0x8380) {
-		for (i = 8; i <= 28; i++)
-			sw_w32(0, (volatile void *)0xBB00d57c + i * 0x80);
-	}
-	return 0;
-}
 
 void print_matrix(void)
 {
@@ -941,74 +335,11 @@ static int rtl838x_setup(struct dsa_switch *ds)
 {
 	int i;
 	u32 port_bitmap = 0;
-	struct rtl838x_priv *priv = ds->priv;
-	struct device_node *dn;
-	u32 pn;
-
-	dn = dsa_to_port(ds, CPU_PORT)->master->dev.of_node;
-	if (dn && of_find_node_by_name(dn, "mdio-bus")) {
-		dn = of_find_node_by_name(dn, "mdio-bus");
-		printk("mdio-bus found %s\n", dn->name);
-		for_each_node_by_name(dn, "ethernet-phy") {
-			if(of_property_read_u32(dn, "reg", &pn))
-				continue;
-		//	printk("index %d", pn);
-			if (of_property_read_bool(dn, "phy-is-integrated")
-				&& of_property_read_bool(dn, "sfp")) {
-				priv->ports[pn].phy = PHY_RTL838X_SDS;
-			}
-			if (of_property_read_bool(dn, "phy-is-integrated")
-				&& !of_property_read_bool(dn, "sfp")) {
-				priv->ports[pn].phy = PHY_RTL8218B_INT;
-			}
-			if (!of_property_read_bool(dn, "phy-is-integrated")
-				&& of_property_read_bool(dn, "sfp")) {
-				priv->ports[pn].phy = PHY_RTL8214FC;
-			}
-			if (!of_property_read_bool(dn, "phy-is-integrated")
-				&& !of_property_read_bool(dn, "sfp")) {
-				priv->ports[pn].phy = PHY_RTL8218B_EXT;
-			}
-		}
-	} else {
-		pr_err("Master has no device node, or no mdio node\n");
-		return -ENODEV;
-	}
-
-	/* Power on fibre ports and reset them if necessary */
-	if (priv->ports[24].phy == PHY_RTL838X_SDS) {
-		printk("Powering on fibre ports & reset\n");
-		rtl8380_sds_power(24, 1);
-		rtl8380_sds_power(26, 1);
-	}
-
+	struct rtl838x_switch_priv *priv = ds->priv;
+	
 	/* Disable MAC polling the PHY so that we can start configuration */
 	sw_w32(0x00000000, RTL838X_SMI_POLL_CTRL);
 
-	rtl8380_configure_mac(priv);
-
-	if (priv->ports[24].phy == PHY_RTL838X_SDS) {
-		rtl8380_configure_serdes();
-	}
-
-	/* Enable PHY control via SoC */
-	sw_w32_mask(0, 1 << 15, RTL838X_SMI_GLB_CTRL);
-
-	if (priv->ports[0].phy == PHY_RTL8218B_EXT) {
-		printk("Got an external RTL8218B phy at 0!\n");
-		rtl8380_configure_ext_rtl8218b(0);
-	}
-	
-	if (priv->ports[8].phy == PHY_RTL8218B_INT) {
-		printk("Got an internal RTL8218B phy at 8!\n");
-		rtl8380_configure_int_rtl8218b(8);
-	}
-	
-	if (priv->ports[24].phy == PHY_RTL8214FC) {
-		printk("Got an external PHY_RTL8214FC phy at 24!\n");
-		rtl8380_configure_rtl8214fc(24);
-	}
-	
 	for (i = 0; i < ds->num_ports; i++)
 		priv->ports[i].enable = false;
 	priv->ports[CPU_PORT].enable = true;
@@ -1086,7 +417,7 @@ rtl838x_get_tag_protocol(struct dsa_switch *ds, int port)
 	 */
 	return DSA_TAG_PROTO_TRAILER;
 }
-
+/*
 void rtl838x_fixed_link_update(struct dsa_switch *ds, int port,
 			       struct fixed_phy_status *st)
 { 
@@ -1115,8 +446,9 @@ void rtl838x_fixed_link_update(struct dsa_switch *ds, int port,
 	// LINK
 	
 }
-
-
+*/
+/*
+ * 
 void rtl838x_adjust_link(struct dsa_switch *ds, int port,
 			 struct phy_device *phydev)
 {
@@ -1144,14 +476,14 @@ void rtl838x_adjust_link(struct dsa_switch *ds, int port,
 	if ( phydev->duplex == DUPLEX_HALF )
 		reg &= ~(1 << 8);
 
-	/* disable autoneg */
+	// disable autoneg
 	reg &= ~(1 << 8);
 
 	sw_w32(reg, MAPLE_SDS4_FIB_REG0r + offset);
 
 	rtl8380_sds_rst(port);
 }
-
+*/
 
 static void rtl838x_port_stp_state_get(u32 msti, u32 *state)
 {
@@ -1172,7 +504,7 @@ static void rtl838x_port_stp_state_set(struct dsa_switch *ds, int port,
 	u32 cmd, msti = 0;
 	u32 port_state[2];
 	int index, bit;
-	struct rtl838x_priv *priv = ds->priv;
+	struct rtl838x_switch_priv *priv = ds->priv;
 /*	printk("rtl838x_port_stp_state_set, port %d state %2x\n", port, state); */
 	mutex_lock(&priv->reg_mutex);
 
@@ -1276,7 +608,7 @@ static void rtl838x_vlan_profile_dump(int index)
 static int rtl838x_vlan_filtering(struct dsa_switch *ds, int port,
 				  bool vlan_filtering)
 {
-	struct rtl838x_priv *priv = ds->priv;
+	struct rtl838x_switch_priv *priv = ds->priv;
 	printk("rtl838x_port_vlan_filtering port %d\n", port);
 	mutex_lock(&priv->reg_mutex);
 
@@ -1320,7 +652,7 @@ static int rtl838x_vlan_prepare(struct dsa_switch *ds, int port,
 				const struct switchdev_obj_port_vlan *vlan)
 {
 	struct rtl838x_vlan_info info;
-	struct rtl838x_priv *priv = ds->priv;
+	struct rtl838x_switch_priv *priv = ds->priv;
 	mutex_lock(&priv->reg_mutex);
 
 	printk("rtl838x_vlan_prepare, port %d\n", port);
@@ -1341,12 +673,13 @@ static void rtl838x_vlan_add(struct dsa_switch *ds, int port,
 			    const struct switchdev_obj_port_vlan *vlan)
 {
 	struct rtl838x_vlan_info info;
-	struct rtl838x_priv *priv = ds->priv;
+	struct rtl838x_switch_priv *priv = ds->priv;
 	int v;
 	u32 portmask;
 
 	printk("rtl838x_vlan_add, port %d, vid_end %d, vid_end %d, flags %x\n",
 	       port, vlan->vid_begin, vlan->vid_end, vlan->flags);
+	return;
 	if (vlan->vid_begin > 4095 || vlan->vid_end > 4095) {
 		dev_err(priv->dev, "VLAN out of range: %d - %d",
 			vlan->vid_begin, vlan->vid_end);
@@ -1391,7 +724,7 @@ static int rtl838x_vlan_del(struct dsa_switch *ds, int port,
 static void rtl838x_port_bridge_leave (struct dsa_switch *ds, int port,
 				      struct net_device *bridge)
 {
-	struct rtl838x_priv *priv = ds->priv;
+	struct rtl838x_switch_priv *priv = ds->priv;
 	u32 port_bitmap = 1 << CPU_PORT;
 	int i;
 
@@ -1429,7 +762,7 @@ static void rtl838x_port_bridge_leave (struct dsa_switch *ds, int port,
 static int rtl838x_port_bridge_join(struct dsa_switch *ds, int port,
 				      struct net_device *bridge)
 {
-	struct rtl838x_priv *priv = ds->priv;
+	struct rtl838x_switch_priv *priv = ds->priv;
 	u32 port_bitmap = 1 << CPU_PORT;
 	int i;
 
@@ -1491,7 +824,7 @@ static int rtl838x_port_fdb_dump(struct dsa_switch *ds, int port,
 static int rtl838x_port_enable(struct dsa_switch *ds, int port,
 				struct phy_device *phydev)
 {
-	struct rtl838x_priv *priv = ds->priv;
+	struct rtl838x_switch_priv *priv = ds->priv;
 	printk("rtl838x_port_enable: %x %d", (u32) priv, port);
 	priv->ports[port].enable = true;
 
@@ -1512,7 +845,7 @@ static int rtl838x_port_enable(struct dsa_switch *ds, int port,
 
 static void rtl838x_port_disable(struct dsa_switch *ds, int port)
 {
-	struct rtl838x_priv *priv = ds->priv;
+	struct rtl838x_switch_priv *priv = ds->priv;
 	printk("rtl838x_port_disable %x: %d", (u32)priv, port);
 
 	/* you can only disable user ports */
@@ -1533,40 +866,330 @@ static void rtl838x_port_disable(struct dsa_switch *ds, int port)
 	return;
 }
 
+static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
+				      unsigned int mode,
+				      const struct phylink_link_state *state)
+{
+	// struct rtl838x_eth_priv *priv = ds->priv;
+	u32 reg;
+
+	printk("rtl838x_phylink_mac_config port %d, mode %x\n", port, mode);
+	
+	if (port == CPU_PORT) {
+		/* Set Speed, duplex, flow control
+		* FORCE_EN | LINK_EN | NWAY_EN | DUP_SEL 
+		* | SPD_SEL = 0b10 | FORCE_FC_EN | PHY_MASTER_SLV_MANUAL_EN 
+		* | MEDIA_SEL
+		*/
+		sw_w32(0x6192F, RTL838X_MAC_FORCE_MODE_CTRL(CPU_PORT));
+
+		/* allow CRC errors on CPU-port */
+		sw_w32_mask(0, 0x8, RTL838X_MAC_PORT_CTRL(CPU_PORT));
+		return;
+	}
+	
+	switch (state->interface) {
+	case PHY_INTERFACE_MODE_RGMII:
+		printk("PHY_INTERFACE_MODE_RGMII\n");
+		/* Fallthrough */
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+		printk("PHY_INTERFACE_MODE_RGMII_TXID\n");
+		break;
+	case PHY_INTERFACE_MODE_MII:
+		printk("PHY_INTERFACE_MODE_MII\n");
+		break;
+	case PHY_INTERFACE_MODE_REVMII:
+		printk("PHY_INTERFACE_MODE_REVMII\n");
+		break;
+	default:
+		/* all other PHYs */
+		printk("Default link state\n");
+	}
+
+	/* Clear id_mode_dis bit, and the existing port mode, let
+	 * RGMII_MODE_EN bet set by mac_link_{up,down}
+	 */
+	reg = sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(port));
+	reg &= ~(RX_PAUSE_EN | TX_PAUSE_EN);
+	
+	if (state->pause & MLO_PAUSE_TXRX_MASK) {
+		if (state->pause & MLO_PAUSE_TX)
+			reg |= TX_PAUSE_EN;
+		reg |= RX_PAUSE_EN;
+	}
+
+	reg &= ~(3 << 4);
+	switch (state->speed) {
+	case SPEED_1000:
+		reg |= 2 << 4;
+		break;
+	case SPEED_100:
+		reg |= 1 << 4;
+		break;
+	}
+
+	reg &= ~(DUPLEX_FULL | FORCE_LINK_EN);
+	if (state->link)
+		reg |= FORCE_LINK_EN;
+	if (state->duplex == DUPLEX_FULL)
+		reg |= DUPLX_MODE;
+
+	sw_w32(reg, RTL838X_MAC_FORCE_MODE_CTRL(port));
+}
+
+static void rtl838x_phylink_mac_link_down(struct dsa_switch *ds, int port,
+				     unsigned int mode,
+				     phy_interface_t interface)
+{
+	printk("In rtl838x_phylink_mac_link_down, port %d, mode %d", port, mode);
+	if (port == CPU_PORT)
+		return;
+
+	/* Stop TX/RX to port */
+	sw_w32_mask(0x03, 0, RTL838X_MAC_PORT_CTRL(port));
+}
+
+static void rtl838x_phylink_mac_link_up(struct dsa_switch *ds, int port,
+				   unsigned int mode,
+				   phy_interface_t interface,
+				   struct phy_device *phydev)
+{
+	printk("In rtl838x_phylink_mac_link_up, port %d, mode %d", port, mode);
+	if (port == CPU_PORT) {
+		/* Restart TX/RX to CPU_PORT */
+		sw_w32(0x03, RTL838X_MAC_PORT_CTRL(CPU_PORT));
+		return;
+	}
+	/* Restart TX/RX to port */
+	sw_w32_mask(0, 0x03, RTL838X_MAC_PORT_CTRL(port));
+}
+
+static void rtl838x_phylink_validate(struct dsa_switch *ds, int port,
+				     unsigned long *supported,
+				     struct phylink_link_state *state)
+{
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
+	// struct rtl838x_eth_priv *priv = ds->priv;
+	printk("In rtl838x_phylink_validate, port %d", port);
+
+	if (!phy_interface_mode_is_rgmii(state->interface) &&
+	    state->interface != PHY_INTERFACE_MODE_1000BASEX &&
+	    state->interface != PHY_INTERFACE_MODE_QSGMII &&
+	    state->interface != PHY_INTERFACE_MODE_INTERNAL &&
+	    state->interface != PHY_INTERFACE_MODE_SGMII) {
+		bitmap_zero(supported, __ETHTOOL_LINK_MODE_MASK_NBITS);
+		dev_err(ds->dev,
+			"Unsupported interface: %d for port %d\n",
+			state->interface, port);
+		return;
+	}
+
+	/* switch chip-id? if (priv->id == 0x8382) */
+
+	/* Allow all the expected bits */
+	phylink_set(mask, Autoneg);
+	phylink_set_port_modes(mask);
+	phylink_set(mask, Pause);
+	phylink_set(mask, Asym_Pause);
+	
+	switch (state->interface) {
+	case PHY_INTERFACE_MODE_TRGMII:
+		phylink_set(mask, 1000baseT_Full);
+		break;
+	case PHY_INTERFACE_MODE_1000BASEX:
+		phylink_set(mask, 1000baseX_Full);
+		break;
+	case PHY_INTERFACE_MODE_GMII:
+	case PHY_INTERFACE_MODE_RGMII:
+	case PHY_INTERFACE_MODE_RGMII_ID:
+	case PHY_INTERFACE_MODE_RGMII_RXID:
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+		phylink_set(mask, 1000baseT_Half);
+		/* fall through */
+	case PHY_INTERFACE_MODE_SGMII:
+		phylink_set(mask, 1000baseT_Full);
+		phylink_set(mask, 1000baseX_Full);
+		/* fall through */
+	case PHY_INTERFACE_MODE_MII:
+	case PHY_INTERFACE_MODE_RMII:
+	case PHY_INTERFACE_MODE_REVMII:
+	case PHY_INTERFACE_MODE_NA:
+	default:
+		phylink_set(mask, 10baseT_Half);
+		phylink_set(mask, 10baseT_Full);
+		phylink_set(mask, 100baseT_Half);
+		phylink_set(mask, 100baseT_Full);
+		break;
+	}
+}
+
+static int rtl838x_phylink_mac_link_state(struct dsa_switch *ds, int port,
+					  struct phylink_link_state *state)
+{
+	u32 speed;
+
+	if (port < 0 || port > CPU_PORT)
+		return -EINVAL;
+	
+	state->link = 0;
+	if (sw_r32(RTL838X_MAC_LINK_STS) & (1 << port))
+		state->link = 1;
+	state->duplex = 0;
+	if (sw_r32(RTL838X_MAC_LINK_DUP_STS) & (1 << port))
+		state->duplex = 1;
+
+	speed = sw_r32(RTL838X_MAC_LINK_SPD_STS(port));
+	speed >>= (port % 16) << 1;
+	switch (speed & 0x3) {
+	case 0:
+		state->speed = SPEED_10;
+		break;
+	case 1:
+		state->speed = SPEED_100;
+		break;
+	case 2:
+		state->speed = SPEED_1000;
+		break;
+	default:
+		state->speed = SPEED_UNKNOWN;
+		break;
+	}
+
+	state->pause &= (MLO_PAUSE_RX | MLO_PAUSE_TX);
+	if (sw_r32(RTL838X_MAC_RX_PAUSE_STS) & (1 << port))
+		state->pause |= MLO_PAUSE_RX;
+	if (sw_r32(RTL838X_MAC_TX_PAUSE_STS) & (1 << port))
+		state->pause |= MLO_PAUSE_TX;
+	return 1;
+}
+
+static int rtl838x_mdio_probe(struct rtl838x_switch_priv *priv)
+{
+	struct device *dev = priv->dev;
+	struct device_node *dn, *mii_np = dev->of_node;
+	struct mii_bus *bus;
+	int ret;
+	u32 pn;
+
+	printk("In rtl838x_mdio_probe\n");
+	mii_np = of_find_compatible_node(NULL, NULL, "realtek,rtl838x-mdio");
+	if (mii_np) {
+		printk("Found compatible MDIO node!\n");
+	} else { 
+		dev_err(priv->dev, "no %s child node found", "mdio-bus");
+		return -ENODEV;
+	}
+	
+	priv->mii_bus = of_mdio_find_bus(mii_np);
+	if (!priv->mii_bus) {
+		printk("Deferring probe of mdio bus\n");
+		return -EPROBE_DEFER;
+	}
+	if (!of_device_is_available(mii_np))
+		ret = -ENODEV;
+
+	bus = devm_mdiobus_alloc(priv->ds->dev);
+	if (!bus)
+		return -ENOMEM;
+
+	bus->name = "rtl838x slave mii";
+	bus->read = &rtl838x_mdio_read;
+	bus->write = &rtl838x_mdio_write;
+	snprintf(bus->id, MII_BUS_ID_SIZE, "%s-%d", bus->name, dev->id);
+	bus->parent = dev;
+	priv->ds->slave_mii_bus = bus;
+	priv->ds->slave_mii_bus->priv = priv;
+
+	ret = mdiobus_register(priv->ds->slave_mii_bus);
+	if (ret && mii_np) {
+		of_node_put(dn);
+		return ret;
+	}
+
+	dn = mii_np;
+	for_each_node_by_name(dn, "ethernet-phy") {
+		if(of_property_read_u32(dn, "reg", &pn))
+			continue;
+	//	printk("index %d", pn);
+		if (of_property_read_bool(dn, "phy-is-integrated")
+			&& of_property_read_bool(dn, "sfp")) {
+			priv->ports[pn].phy = PHY_RTL838X_SDS;
+		}
+		if (of_property_read_bool(dn, "phy-is-integrated")
+			&& !of_property_read_bool(dn, "sfp")) {
+			priv->ports[pn].phy = PHY_RTL8218B_INT;
+		}
+		if (!of_property_read_bool(dn, "phy-is-integrated")
+			&& of_property_read_bool(dn, "sfp")) {
+			priv->ports[pn].phy = PHY_RTL8214FC;
+		}
+		if (!of_property_read_bool(dn, "phy-is-integrated")
+			&& !of_property_read_bool(dn, "sfp")) {
+			priv->ports[pn].phy = PHY_RTL8218B_EXT;
+		}
+	}
+
+	/* Disable MAC polling the PHY so that we can start configuration */
+	sw_w32(0x00000000, RTL838X_SMI_POLL_CTRL);
+
+	/* Enable PHY control via SoC */
+	sw_w32_mask(0, 1 << 15, RTL838X_SMI_GLB_CTRL);
+	/* Power on fibre ports and reset them if necessary */
+	if (priv->ports[24].phy == PHY_RTL838X_SDS) {
+		printk("Powering on fibre ports & reset\n");
+		rtl8380_sds_power(24, 1);
+		rtl8380_sds_power(26, 1);
+	}
+
+	rtl838x_phy_init(priv);
+
+	printk("In rtl838x_mdio_probe done\n");
+	return 0;
+/*
+err_out_free_mdiobus:
+	mdiobus_free(bus);
+	return ret; */
+}
+
 static const struct dsa_switch_ops rtl838x_switch_ops = {
-	.get_tag_protocol = rtl838x_get_tag_protocol,
-	.setup = rtl838x_setup,
-	.adjust_link = rtl838x_adjust_link,
-	.fixed_link_update = rtl838x_fixed_link_update,
-	.port_vlan_filtering = rtl838x_vlan_filtering,
-	.port_vlan_prepare = rtl838x_vlan_prepare,
-	.port_vlan_add = rtl838x_vlan_add,
-	.port_vlan_del = rtl838x_vlan_del,
-	.port_bridge_join = rtl838x_port_bridge_join,
-	.port_bridge_leave = rtl838x_port_bridge_leave,
-	.port_stp_state_set = rtl838x_port_stp_state_set,
-	.port_fdb_add = rtl838x_port_fdb_add,
-	.port_fdb_del = rtl838x_port_fdb_del,
-	.port_fdb_dump = rtl838x_port_fdb_dump,
-	.port_enable = rtl838x_port_enable,
-	.port_disable = rtl838x_port_disable,
-	.phy_read = dsa_phy_read,
-	.phy_write = dsa_phy_write,
-	.get_strings = rtl838x_get_strings,
-	.get_ethtool_stats = rtl838x_get_ethtool_stats,
-	.get_sset_count = rtl838x_get_sset_count,
+	.get_tag_protocol	= rtl838x_get_tag_protocol,
+	.setup			= rtl838x_setup,
+/*	.adjust_link		= rtl838x_adjust_link,
+	.fixed_link_update	= rtl838x_fixed_link_update,*/
+	.port_vlan_filtering	= rtl838x_vlan_filtering,
+	.port_vlan_prepare	= rtl838x_vlan_prepare,
+	.port_vlan_add		= rtl838x_vlan_add,
+	.port_vlan_del		= rtl838x_vlan_del,
+	.port_bridge_join	= rtl838x_port_bridge_join,
+	.port_bridge_leave	= rtl838x_port_bridge_leave,
+	.port_stp_state_set	= rtl838x_port_stp_state_set,
+	.port_fdb_add		= rtl838x_port_fdb_add,
+	.port_fdb_del		= rtl838x_port_fdb_del,
+	.port_fdb_dump		= rtl838x_port_fdb_dump,
+	.port_enable		= rtl838x_port_enable,
+	.port_disable		= rtl838x_port_disable,
+	.phy_read		= dsa_phy_read,
+	.phy_write		= dsa_phy_write,
+	.get_strings		= rtl838x_get_strings,
+	.get_ethtool_stats	= rtl838x_get_ethtool_stats,
+	.get_sset_count		= rtl838x_get_sset_count,
+	.phylink_validate	= rtl838x_phylink_validate,
+	.phylink_mac_link_state	= rtl838x_phylink_mac_link_state,
+	.phylink_mac_config	= rtl838x_phylink_mac_config,
+	.phylink_mac_link_down	= rtl838x_phylink_mac_link_down,
+	.phylink_mac_link_up	= rtl838x_phylink_mac_link_up,
 };
 
 static int __init rtl838x_sw_probe(struct platform_device *pdev)
 {
 	int err = 0;
-	struct rtl838x_priv *priv;
+	struct rtl838x_switch_priv *priv;
 	struct device *dev = &pdev->dev;
 //	struct rtl838x_vlan_info info;
 
 	printk("Probing RTL838X switch device\n");
 	if (!pdev->dev.of_node) {
-		dev_err(&pdev->dev, "No DT found\n");
+		dev_err(dev, "No DT found\n");
 		return -EINVAL;
 	}
 
@@ -1583,44 +1206,35 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 	priv->ds->ops = &rtl838x_switch_ops;
 	priv->dev = dev;
 	priv->ds->num_ports = 30;
-	priv->id = sw_r32(RTL838X_MODEL_NAME_INFO) >> 16;
 	
-	switch (priv->id) {
-	case 0x8380:
-	printk("Found RTL8380M\n");
-		break;
-	case 0x8382:
-		printk("Found RTL8382M\n");
-		break;
-	default:
-		printk("Unknown chip id (%04x)\n", priv->id);
-		return -ENODEV;
-	}
 	rtl8380_get_version(priv);
 	printk("Chip version %c\n", priv->version);
-		
-	err = dsa_register_switch(priv->ds);
-	if(err) {
-		printk("Error registering switch: %d\n", err);
+
+	err = rtl838x_mdio_probe(priv);
+	if (err) {
 		return err;
 	}
-/*
-	rtl838x_vlan_profile_dump(0);
+	err = dsa_register_switch(priv->ds);
+	if (err) {
+		dev_err(dev, "Error registering switch: %d\n", err);
+		return err;
+	}
 
-	rtl838x_vlan_tables_read(1, &info);
-	printk("Tagged %x, untagged %x, prof %x, MC# %d, UC# %d, MSTI %x\n",
-	       info.tagged_ports, info.untagged_ports, info.vlan_conf & 7,
-	       (info.vlan_conf & 8) >> 3, (info.vlan_conf & 16) >> 4,
-	       (info.vlan_conf & 0x3e0) >> 5 );
+	/* Enable link and media change interrupts... */
+	sw_w32_mask(0, 3, RTL838X_ISR_GLB_SRC);
+	/* ... for all ports */
+	sw_w32(0xffffffff, RTL838X_ISR_PORT_LINK_STS_CHG);
+	sw_w32(0xffffffff, RTL838X_IMR_PORT_LINK_STS_CHG);
+	/* Enable interrupts for switch */
+	sw_w32(0x1, RTL838X_IMR_GLB);
+	priv->link_state_irq = 28;
+	err = request_irq(priv->link_state_irq, rtl838x_switch_irq,
+			  IRQF_SHARED, "rtl8838x-link-state", priv->ds);
+	if (err) {
+		dev_err(dev, "Error setting up switch interrupt.\n");
+		/* Need to free allocated switch here */
+	}
 
-	rtl838x_vlan_profile_dump(1);
-
-	rtl838x_vlan_tables_read(2, &info);
-	printk("Tagged %x, untagged %x, prof %x, MC# %d, UC# %d, MSTI %x\n",
-	       info.tagged_ports, info.untagged_ports, info.vlan_conf & 7,
-	       (info.vlan_conf & 8) >> 3, (info.vlan_conf & 16) >> 4,
-	       (info.vlan_conf & 0x3e0) >> 5 );
-*/
 	return err;
 }
 

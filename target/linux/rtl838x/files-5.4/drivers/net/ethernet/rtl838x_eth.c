@@ -8,8 +8,6 @@
 #include <linux/etherdevice.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
-#include <linux/mii.h>
-#include <linux/phy.h>
 #include <linux/platform_device.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -17,6 +15,7 @@
 #include <linux/of_net.h>
 #include <linux/of_mdio.h>
 #include <linux/module.h>
+#include <linux/phylink.h>
 #include <net/dsa.h>
 
 #include <asm/mach-rtl838x/mach-rtl838x.h>
@@ -55,18 +54,19 @@ struct ring_b {
 };
 
 struct rtl838x_eth_priv {
-	uint8_t		ports;  /* Number of ports w/o CPU-port */
-	struct resource *res;
 	struct net_device *netdev;
 	struct platform_device *pdev;
 	void 		*membase;
 	spinlock_t	lock;
 	struct mii_bus	*mii_bus;
 	struct napi_struct napi;
+	struct phylink *phylink;
+	struct phylink_config phylink_config;
+	u32 id;
 };
 
-extern int rtl838x_write_phy(u32 port, u32 page, u32 reg, u32 val);
-extern int rtl838x_read_phy(u32 port, u32 page, u32 reg, u32 *val);
+extern int rtl838x_phy_init(struct rtl838x_eth_priv *priv);
+extern int rtl8380_sds_power(int mac, int val);
 
 static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 {
@@ -99,7 +99,7 @@ static void rtl838x_hw_reset(void)
 	/* Reset NIC */
 	sw_w32(0x08, RTL838X_RST_GLB_CTRL_0);
 	udelay(50 * 1000);
-    
+
 	do {
 		udelay(20);
 	} while (sw_r32(RTL838X_RST_GLB_CTRL_0));
@@ -110,7 +110,11 @@ static void rtl838x_hw_reset(void)
 	/* Link up, also 
 	sw_w32_mask(0, 0x03, RTL838X_MAC_FORCE_MODE_CTRL(CPU_PORT)); */
 
-	/* Set Speed, duplex, flow control */
+	/* Set Speed, duplex, flow control
+	 * FORCE_EN | LINK_EN | NWAY_EN | DUP_SEL 
+	 * | SPD_SEL = 0b10 | FORCE_FC_EN | PHY_MASTER_SLV_MANUAL_EN 
+	 * | MEDIA_SEL
+	 */
 	sw_w32(0x6192F, RTL838X_MAC_FORCE_MODE_CTRL(CPU_PORT));
 
 	/* allow CRC errors on CPU-port */
@@ -191,28 +195,30 @@ static void rtl838x_setup_ring_buffer(struct ring_b *ring)
 	}
 }
 
-static int rtl838x_eth_open(struct net_device *dev)
+static int rtl838x_eth_open(struct net_device *ndev)
 {
 	unsigned long flags;
-	struct rtl838x_eth_priv *priv = netdev_priv(dev);
+	struct rtl838x_eth_priv *priv = netdev_priv(ndev);
 	struct ring_b *ring = priv->membase;
-	int ret;
-	
+	int err;
+
 	printk("rtl838x_eth_open called %x, ring %x\n", (uint32_t)priv, (uint32_t)ring);
 	spin_lock_irqsave(&priv->lock, flags);
 	rtl838x_hw_reset();
 	rtl838x_setup_ring_buffer(ring);
 	rtl838x_hw_ring_setup(priv);
-	
-	ret = request_irq(dev->irq, rtl838x_net_irq, IRQF_SHARED,
-			dev->name, dev);
-	if (ret)
-		return ret;
-	
+	err = request_irq(ndev->irq, rtl838x_net_irq, IRQF_SHARED,
+			ndev->name, ndev);
+	if (err) {
+		netdev_err(ndev, "%s: could not acquire interrupt: %d\n",
+			   __func__, err); 
+		return err;
+	}
+	phylink_start(priv->phylink);
+
 	napi_enable(&priv->napi);
-	
-	netif_start_queue(dev);
-	
+	netif_start_queue(ndev);
+
 	rtl838x_hw_en_rxtx();
 	spin_unlock_irqrestore(&priv->lock, flags);
 	
@@ -226,17 +232,19 @@ static void rtl838x_hw_stop(void)
 	sw_w32(0x00000000, RTL838X_DMA_IF_CTRL);
 }
 
-static int rtl838x_eth_stop(struct net_device *dev)
+static int rtl838x_eth_stop(struct net_device *ndev)
 {
 	unsigned long flags;
-	struct rtl838x_eth_priv *priv = netdev_priv(dev);
+	struct rtl838x_eth_priv *priv = netdev_priv(ndev);
+
 	printk("in rtl838x_eth_stop %x\n", (uint32_t)priv);
+
 	spin_lock_irqsave(&priv->lock, flags);
+	phylink_stop(priv->phylink);
 	rtl838x_hw_stop();
-	
-	free_irq(dev->irq, dev);
+	free_irq(ndev->irq, ndev);
 	napi_disable(&priv->napi);
-	netif_stop_queue(dev);
+	netif_stop_queue(ndev);
 	spin_unlock_irqrestore(&priv->lock, flags);
 	return 0;
 }
@@ -266,18 +274,37 @@ static void rtl838x_eth_set_multicast_list(struct net_device *dev)
 
 */
 }
+/* Set link ksettings (phy address, speed) for ethtools 
+static int
+rtl838x_ethtool_set_link_ksettings(struct net_device *ndev,
+				  const struct ethtool_link_ksettings *cmd)
+{
+	struct rtl838x_eth_priv *priv = netdev_priv(ndev);
 
-static void rtl838x_eth_tx_timeout(struct net_device *dev)
+	return phylink_ethtool_ksettings_set(priv->phylink, cmd);
+}
+
+Get link ksettings for ethtools 
+static int
+rtl838x_ethtool_get_link_ksettings(struct net_device *ndev,
+				  struct ethtool_link_ksettings *cmd)
+{
+	struct rtl838x_eth_priv *priv = netdev_priv(ndev);
+
+	return phylink_ethtool_ksettings_get(priv->phylink, cmd);
+}
+*/
+static void rtl838x_eth_tx_timeout(struct net_device *ndev)
 {
 	unsigned long flags;
-	struct rtl838x_eth_priv *priv = netdev_priv(dev);
+	struct rtl838x_eth_priv *priv = netdev_priv(ndev);
 	printk("in rtl838x_eth_tx_timeout %x\n", (uint32_t)priv);
 	spin_lock_irqsave(&priv->lock, flags);
 	rtl838x_hw_stop();
 	rtl838x_hw_ring_setup(priv);
 	rtl838x_hw_en_rxtx();
-	netif_trans_update(dev);
-	netif_start_queue(dev);
+	netif_trans_update(ndev);
+	netif_start_queue(ndev);
 	spin_unlock_irqrestore(&priv->lock, flags);
 }
 
@@ -414,7 +441,7 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 	
 	spin_lock_irqsave(&priv->lock, flags);
 	last = (u32 *)KSEG1ADDR(sw_r32(RTL838X_DMA_IF_RX_CUR(r)));
-/*	printk("ring %2x (index %2x): current %x, last: %x\n", r, ring->c_rx[r], (u32) &ring->rx_r[r][ring->c_rx[r]], (u32) last); */
+//	printk("ring %2x (index %2x): current %x, last: %x\n", r, ring->c_rx[r], (u32) &ring->rx_r[r][ring->c_rx[r]], (u32) last);
 	
 	if ( &ring->rx_r[r][ring->c_rx[r]] == last ) {
 		spin_unlock_irqrestore(&priv->lock, flags);
@@ -526,32 +553,365 @@ static int rtl838x_poll_rx(struct napi_struct *napi, int budget)
 	return work_done;
 }
 
+
+static void rtl838x_validate(struct phylink_config *config,
+			 unsigned long *supported,
+			 struct phylink_link_state *state)
+{
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
+	int port = CPU_PORT;
+
+	printk("conf: %x, dev: %x\n", (u32) config, (u32) config->dev);
+	printk("type: %x\n", (u32) config->dev->type);
+	
+	if (!phy_interface_mode_is_rgmii(state->interface) &&
+	    state->interface != PHY_INTERFACE_MODE_QSGMII &&
+	    state->interface != PHY_INTERFACE_MODE_INTERNAL &&
+	    state->interface != PHY_INTERFACE_MODE_SGMII) {
+		bitmap_zero(supported, __ETHTOOL_LINK_MODE_MASK_NBITS);
+		pr_err("Unsupported interface: %d for port %d\n",
+			state->interface, port);
+		return;
+	}
+
+	/* switch chip-id? if (priv->id == 0x8382) */
+
+	/* Allow all the expected bits */
+	phylink_set(mask, Autoneg);
+	phylink_set_port_modes(mask);
+	phylink_set(mask, Pause);
+	phylink_set(mask, Asym_Pause);
+	
+	switch (state->interface) {
+	case PHY_INTERFACE_MODE_TRGMII:
+		phylink_set(mask, 1000baseT_Full);
+		break;
+	case PHY_INTERFACE_MODE_1000BASEX:
+		phylink_set(mask, 1000baseX_Full);
+		break;
+	case PHY_INTERFACE_MODE_GMII:
+	case PHY_INTERFACE_MODE_RGMII:
+	case PHY_INTERFACE_MODE_RGMII_ID:
+	case PHY_INTERFACE_MODE_RGMII_RXID:
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+		phylink_set(mask, 1000baseT_Half);
+		/* fall through */
+	case PHY_INTERFACE_MODE_SGMII:
+		phylink_set(mask, 1000baseT_Full);
+		phylink_set(mask, 1000baseX_Full);
+		/* fall through */
+	case PHY_INTERFACE_MODE_MII:
+	case PHY_INTERFACE_MODE_RMII:
+	case PHY_INTERFACE_MODE_REVMII:
+	case PHY_INTERFACE_MODE_NA:
+	default:
+		phylink_set(mask, 10baseT_Half);
+		phylink_set(mask, 10baseT_Full);
+		phylink_set(mask, 100baseT_Half);
+		phylink_set(mask, 100baseT_Full);
+		break;
+	}
+}
+
+
+static void rtl838x_mac_config(struct phylink_config *config,
+			       unsigned int mode,
+			       const struct phylink_link_state *state)
+{
+	// struct rtl838x_eth_priv *priv = ds->priv;
+	u32 reg;
+	int port = 8;
+	const char *type;
+
+	printk("In rtl838x_mac_config: %x\n", mode);
+	
+	if(config->dev->init_name)
+		printk("DEV: %s\n", config->dev->init_name);
+	
+	if(config->dev->of_node)
+		printk("DEV: %s\n", config->dev->of_node->full_name);
+	
+	if( !config->dev->type ) {
+		printk("No type\n");
+		return;
+	}
+
+	type = config->dev->type->name;
+	printk("rtl838x_mac_config port %d, type %s\n", port, type);
+	
+	switch (state->interface) {
+	case PHY_INTERFACE_MODE_RGMII:
+		printk("PHY_INTERFACE_MODE_RGMII\n");
+		/* Fallthrough */
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+		printk("PHY_INTERFACE_MODE_RGMII_TXID\n");
+		break;
+	case PHY_INTERFACE_MODE_MII:
+		printk("PHY_INTERFACE_MODE_MII\n");
+		break;
+	case PHY_INTERFACE_MODE_REVMII:
+		printk("PHY_INTERFACE_MODE_REVMII\n");
+		break;
+	default:
+		/* all other PHYs */
+		printk("Default linke state\n");
+	}
+
+	/* Clear id_mode_dis bit, and the existing port mode, let
+	 * RGMII_MODE_EN bet set by mac_link_{up,down}
+	 */
+	reg = sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(port));
+	reg &= ~(RX_PAUSE_EN | TX_PAUSE_EN);
+	
+	if (state->pause & MLO_PAUSE_TXRX_MASK) {
+		if (state->pause & MLO_PAUSE_TX)
+			reg |= TX_PAUSE_EN;
+		reg |= RX_PAUSE_EN;
+	}
+
+	reg &= ~(3 << 4);
+	switch (state->speed) {
+	case SPEED_1000:
+		reg |= 2 << 4;
+		break;
+	case SPEED_100:
+		reg |= 1 << 4;
+		break;
+	}
+
+	reg &= ~(DUPLEX_FULL | FORCE_LINK_EN);
+	if (state->link)
+		reg |= FORCE_LINK_EN;
+	if (state->duplex == DUPLEX_FULL)
+		reg |= DUPLX_MODE;
+
+	sw_w32(reg, RTL838X_MAC_FORCE_MODE_CTRL(port));
+}
+
+static void rtl838x_mac_an_restart(struct phylink_config *config)
+{
+	printk("In rtl838x_mac_an_restart, don't know what to do.\n");
+}
+
+static int rtl838x_mac_pcs_get_state(struct phylink_config *config,
+				  struct phylink_link_state *state)
+{
+	u32 speed;
+	int port = CPU_PORT;
+	const char *type;
+
+	printk("In rtl838x_mac_pcs_get_state\n");
+	if( !config->dev->type ) {
+		printk("No type\n");
+		return 1;
+	}
+
+	type = config->dev->type->name;
+	printk("In rtl838x_mac_pcs_get_state: %s\n", type);
+	
+	state->link = 0;
+	if (sw_r32(RTL838X_MAC_LINK_STS) & (1 << port))
+		state->link = 1;
+	state->duplex = 0;
+	if (sw_r32(RTL838X_MAC_LINK_DUP_STS) & (1 << port))
+		state->duplex = 1;
+
+	speed = sw_r32(RTL838X_MAC_LINK_SPD_STS(port));
+	speed >>= (port % 16) << 1;
+	switch (speed & 0x3) {
+	case 0:
+		state->speed = SPEED_10;
+		break;
+	case 1:
+		state->speed = SPEED_100;
+		break;
+	case 2:
+		state->speed = SPEED_1000;
+		break;
+	default:
+		state->speed = SPEED_UNKNOWN;
+		break;
+	}
+
+	state->pause &= (MLO_PAUSE_RX | MLO_PAUSE_TX);
+	if (sw_r32(RTL838X_MAC_RX_PAUSE_STS) & (1 << port))
+		state->pause |= MLO_PAUSE_RX;
+	if (sw_r32(RTL838X_MAC_TX_PAUSE_STS) & (1 << port))
+		state->pause |= MLO_PAUSE_TX;
+
+	return 1;
+}
+	
+static void rtl838x_mac_link_down(struct phylink_config *config,
+				  unsigned int mode,
+				  phy_interface_t interface)
+{
+	int port = 8;
+	
+	const char *type;
+
+	printk("In rtl838x_mac_link_down\n");
+	if( !config->dev->type ) {
+		printk("No type\n");
+		return;
+	}
+
+	type = config->dev->type->name;
+	printk("In rtl838x_mac_link_down: %s\n", type);
+
+	/* Stop TX/RX to port */
+	sw_w32_mask(0x03, 0, RTL838X_MAC_PORT_CTRL(port));
+}
+
+static void rtl838x_mac_link_up(struct phylink_config *config, unsigned int mode,
+			    phy_interface_t interface,
+			    struct phy_device *phy)
+{
+	int port = 8;
+	const char *type;
+
+	printk("In rtl838x_mac_link_up\n");
+	if( !config->dev->type ) {
+		printk("No type\n");
+		return;
+	}
+
+	type = config->dev->type->name;
+	printk("In rtl838x_mac_link_up: %s\n", type);
+	
+	/* Restart TX/RX to port */
+	sw_w32_mask(0, 0x03, RTL838X_MAC_PORT_CTRL(port));
+}
+
 static int rtl838x_set_mac_address(struct net_device *dev, void *p)
 {
 	const struct sockaddr *addr = p;
 	struct rtl838x_eth_priv *priv = netdev_priv(dev);
 	unsigned long flags;
-	
+
 	u8 *mac = (u8*) (p);
-	
+
 	if(IS_ERR(p))
 		mac = dev->dev_addr;
-	
+
 	printk("In rtl838x_set_mac_address %x %x\n", (uint32_t)priv, (uint32_t) addr);
-        spin_lock_irqsave(&priv->lock, flags);
-        sw_w32((mac[0] << 8) | mac[1], RTL838X_MAC);
-        sw_w32((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5], RTL838X_MAC + 4);
+	spin_lock_irqsave(&priv->lock, flags);
+	sw_w32((mac[0] << 8) | mac[1], RTL838X_MAC);
+	sw_w32((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5], RTL838X_MAC + 4);
 
 	/* 2 more registers, ALE/MAC block */
-        sw_w32((mac[0] << 8) | mac[1], RTL838X_MAC_ALE);
-        sw_w32((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5], (RTL838X_MAC_ALE + 4));
-	
-        sw_w32((mac[0] << 8) | mac[1], RTL838X_MAC2);
-        sw_w32((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5], RTL838X_MAC2 + 4);
-	
+	sw_w32((mac[0] << 8) | mac[1], RTL838X_MAC_ALE);
+	sw_w32((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5], (RTL838X_MAC_ALE + 4));
+
+	sw_w32((mac[0] << 8) | mac[1], RTL838X_MAC2);
+	sw_w32((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5], RTL838X_MAC2 + 4);
+
 	ether_addr_copy(dev->dev_addr, p);
 	spin_unlock_irqrestore(&priv->lock, flags);
+
+	return 0;
+}
+
+static int rtl8380_init_mac(struct rtl838x_eth_priv *priv)
+{
+	int i;
+	/* fix timer for EEE */
+	sw_w32(0x5001411, RTL838X_EEE_TX_TIMER_GIGA_CTRL);
+	sw_w32(0x5001417, RTL838X_EEE_TX_TIMER_GELITE_CTRL);
+
+	/* Init VLAN */
+	if (priv->id == 0x8382) {
+		for (i = 0; i <= 28; i++)
+			sw_w32(0, (volatile void *)0xBB00d57c + i * 0x80);
+	}
+	if (priv->id == 0x8380) {
+		for (i = 8; i <= 28; i++)
+			sw_w32(0, (volatile void *)0xBB00d57c + i * 0x80);
+	}
+	return 0;
+}
+
+
+static int rtl838x_mdio_read(struct mii_bus *bus, int mii_id, int regnum)
+{
+	u32 val;
+	int err = rtl838x_read_phy(mii_id, 0, regnum, &val);
+/*	printk("rtl838x_mdio_read: %d, %d", mii_id, regnum);*/
+	if(err)
+		return err;
+	return val;
+}
+
+static int rtl838x_mdio_write(struct mii_bus *bus, int mii_id,
+			     int regnum, u16 value)
+{
+	return rtl838x_write_phy(mii_id, 0, regnum, value);
+}
+
+
+static int rtl838x_mdio_reset(struct mii_bus *bus)
+{
+	int i;
+	printk("rtl838x_mdio_reset\n");
+	/* Disable MAC polling the PHY so that we can start configuration */
+	sw_w32(0x00000000, RTL838X_SMI_POLL_CTRL);
+
+	/* Enable PHY control via SoC */
+	sw_w32_mask(0, 1 << 15, RTL838X_SMI_GLB_CTRL);
 	
+	for (i = 0; i < PHY_MAX_ADDR; i++) {
+		// Probably should reset all PHYs here...
+	}
+	return 0;
+}
+
+static int rtl838x_mdio_init(struct rtl838x_eth_priv *priv)
+{
+	struct device_node *mii_np;
+	int ret;
+
+	printk("In rtl838x_mdio_init\n");
+	mii_np = of_get_child_by_name(priv->pdev->dev.of_node, "mdio-bus");
+		
+	if (!mii_np) {
+		dev_err(&priv->pdev->dev, "no %s child node found", "mdio-bus");
+		return -ENODEV;
+	}
+
+	if (!of_device_is_available(mii_np)) {
+		ret = -ENODEV;
+		goto err_put_node;
+	}
+
+	priv->mii_bus = devm_mdiobus_alloc(&priv->pdev->dev);
+	if (!priv->mii_bus) {
+		ret = -ENOMEM;
+		goto err_put_node;
+	}
+
+	priv->mii_bus->name = "rtl838x-eth-mdio";
+	priv->mii_bus->read = rtl838x_mdio_read;
+	priv->mii_bus->write = rtl838x_mdio_write;
+	priv->mii_bus->reset = rtl838x_mdio_reset;
+	priv->mii_bus->priv = priv;
+	priv->mii_bus->parent = &priv->pdev->dev;
+
+	snprintf(priv->mii_bus->id, MII_BUS_ID_SIZE, "%pOFn", mii_np);
+	ret = of_mdiobus_register(priv->mii_bus, mii_np);
+
+err_put_node:
+	of_node_put(mii_np);
+	return ret;
+}
+
+static int rtl838x_mdio_remove(struct rtl838x_eth_priv *priv)
+{
+	if (!priv->mii_bus)
+		return 0;
+
+	mdiobus_unregister(priv->mii_bus);
+	mdiobus_free(priv->mii_bus);
+
 	return 0;
 }
 
@@ -565,79 +925,29 @@ static const struct net_device_ops rtl838x_eth_netdev_ops = {
 	.ndo_tx_timeout = rtl838x_eth_tx_timeout,
 };
 
-static int rtl838x_mdio_write(struct mii_bus *bus, int phy_addr,
-			  int phy_reg, u16 val)
-{
-	printk("PHY-write: addr %d %x %x\n", phy_addr, phy_reg, val);
-	
-	return rtl838x_write_phy(phy_addr, 0, phy_reg, val);
-}
-
-static int rtl838x_mdio_read(struct mii_bus *bus, int phy_addr, int phy_reg)
-{
-//	struct rtl838x_eth_priv *priv = bus->priv;
-	u32 val;
-	
-/*	printk("PHY-read: addr %d reg: %x\n", phy_addr, phy_reg); */
-	rtl838x_read_phy(phy_addr, 0, phy_reg, &val);
-/*	printk("Result: %x\n", val); */
-	return val;
-}
-
-static void rtl838x_mdio_cleanup(struct rtl838x_eth_priv *priv)
-{
-	if (!priv->mii_bus)
-		return;
-
-	mdiobus_unregister(priv->mii_bus);
-}
-
-static int rtl838x_mdio_init(struct rtl838x_eth_priv *priv)
-{
-	struct device_node *mii_np;
-	int ret;
-
-	mii_np = of_get_child_by_name(priv->pdev->dev.of_node, "mdio-bus");
-	if (!mii_np) {
-		dev_err(&priv->pdev->dev, "no %s child node found", "mdio-bus");
-		return -ENODEV;
-	}
-	printk("Found mdio node\n");
-	if (!of_device_is_available(mii_np)) {
-		ret = -ENODEV;
-		goto err_put_node;
-	}
-
-	priv->mii_bus = devm_mdiobus_alloc(&priv->pdev->dev);
-	if (!priv->mii_bus) {
-		ret = -ENOMEM;
-		goto err_put_node;
-	}
-	printk("Allocated mdio bus\n");
-	priv->mii_bus->name = "mdio";
-	priv->mii_bus->read = rtl838x_mdio_read;
-	priv->mii_bus->write = rtl838x_mdio_write;
-	priv->mii_bus->priv = priv;
-	priv->mii_bus->parent = &priv->pdev->dev;
-
-	snprintf(priv->mii_bus->id, MII_BUS_ID_SIZE, "%pOFn", mii_np);
-	ret = of_mdiobus_register(priv->mii_bus, mii_np);
-
-err_put_node:
-	of_node_put(mii_np);
-	return ret;
-}
+static const struct phylink_mac_ops rtl838x_phylink_ops = {
+	.validate = rtl838x_validate,
+	.mac_link_state = rtl838x_mac_pcs_get_state,
+	.mac_an_restart = rtl838x_mac_an_restart,
+	.mac_config = rtl838x_mac_config,
+	.mac_link_down = rtl838x_mac_link_down,
+	.mac_link_up = rtl838x_mac_link_up,
+};
 
 static int __init rtl838x_eth_probe(struct platform_device *pdev)
 {
 	struct net_device *dev;
+	struct device_node *dn = pdev->dev.of_node;
 	struct rtl838x_eth_priv *priv;
 	struct resource *res, *mem;
 	const void *mac;
-	int err;
+	phy_interface_t phy_mode;
+	struct phylink *phylink;
+	int err = 0;
 
-	pr_info("Probing RTL838X eth device pdev: %x, dev: %x\n", (u32)pdev, (u32)(&(pdev->dev)));
-	if (!pdev->dev.of_node) {
+	pr_info("Probing RTL838X eth device pdev: %x, dev: %x\n",
+		(u32)pdev, (u32)(&(pdev->dev)));
+	if (!dn) {
 		dev_err(&pdev->dev, "No DT found\n");
 		return -EINVAL;
 	}
@@ -648,8 +958,6 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	}
 	SET_NETDEV_DEV(dev, &pdev->dev);
 	priv = netdev_priv(dev);
-	/* copy device tree node to be used by switch device */
-	dev->dev.of_node = pdev->dev.of_node;
 	
 	/* obtain buffer memory space */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -676,7 +984,7 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 		err = -ENOMEM;
 		goto err_free;
 	}
-		
+
 	spin_lock_init(&priv->lock);
 	
 	/* obtain device IRQ number */
@@ -689,6 +997,22 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	dev->irq = res->start;
 	*/
 	dev->irq = 32;
+	priv->id = sw_r32(RTL838X_MODEL_NAME_INFO) >> 16;
+	
+	switch (priv->id) {
+	case 0x8380:
+	printk("Found RTL8380M\n");
+		break;
+	case 0x8382:
+		printk("Found RTL8382M\n");
+		break;
+	default:
+		printk("Unknown chip id (%04x)\n", priv->id);
+		return -ENODEV;
+	}
+	
+	rtl8380_init_mac(priv);
+
 	mac = of_get_mac_address(pdev->dev.of_node);
 	if (!IS_ERR(mac)) {
 		ether_addr_copy(dev->dev_addr, mac);
@@ -697,24 +1021,39 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 		eth_hw_addr_random(dev);
 	}
 	rtl838x_set_mac_address(dev, (void *)mac);
-	
+
 	strcpy(dev->name, "eth%d");
 	dev->netdev_ops = &rtl838x_eth_netdev_ops;
-	priv->res = res;
 	priv->pdev = pdev;
 	priv->netdev = dev;
 	
 	err = rtl838x_mdio_init(priv);
 	if (err)
 		goto err_free;
-	
-	
+
 	err = register_netdev(dev);
 	if (err)
 		goto err_free;
 	
 	netif_napi_add(dev, &priv->napi, rtl838x_poll_rx, 64);
 	platform_set_drvdata(pdev, dev);
+	
+	phy_mode = of_get_phy_mode(dn);
+	if (phy_mode < 0) {
+		dev_err(&pdev->dev, "incorrect phy-mode\n");
+		err = -EINVAL;
+		goto err_free;
+	}
+	priv->phylink_config.dev = &dev->dev;
+	priv->phylink_config.type = PHYLINK_NETDEV;
+
+	phylink = phylink_create(&priv->phylink_config, pdev->dev.fwnode,
+				 phy_mode, &rtl838x_phylink_ops);
+	if (IS_ERR(phylink)) {
+		err = PTR_ERR(phylink);
+		goto err_free;
+	}
+	priv->phylink = phylink;
 	return 0;
 
 err_free:
@@ -729,7 +1068,7 @@ static int rtl838x_eth_remove(struct platform_device *pdev)
 	struct rtl838x_eth_priv *priv = netdev_priv(dev);
 	if (dev) {
 		printk("Removing platform driver for rtl838x-eth\n");
-		rtl838x_mdio_cleanup(priv);
+		rtl838x_mdio_remove(priv);
 		rtl838x_hw_stop();
 		netif_stop_queue(dev);
 		netif_napi_del(&priv->napi);

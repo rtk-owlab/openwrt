@@ -32,34 +32,34 @@ unsigned int rtl838x_ictl_irq_dispatch4(void);
 unsigned int rtl838x_ictl_irq_dispatch5(void);
 
 
-static struct irqaction irq_cascade1 = {        
+static struct irqaction irq_cascade1 = {
 	.handler = no_action,
 	.name = "RTL838X IRQ cascade1",
 };
 
-static struct irqaction irq_cascade2 = {        
+static struct irqaction irq_cascade2 = {
 	.handler = no_action,
 	.name = "RTL838X IRQ cascade2",
 };
 
-static struct irqaction irq_cascade3 = {        
-	.handler = no_action,           
+static struct irqaction irq_cascade3 = {
+	.handler = no_action,
 	.name = "RTL838X IRQ cascade3",
 };
 
-static struct irqaction irq_cascade4 = {        
+static struct irqaction irq_cascade4 = {
 	.handler = no_action,
 	.name = "RTL838X IRQ cascade4",
 };
 
-static struct irqaction irq_cascade5 = {       
+static struct irqaction irq_cascade5 = {
 	.handler = no_action,
 	.name = "RTL838X IRQ cascade5",
 };
 
 static void rtl838x_ictl_enable_irq(struct irq_data *i)
 {   
-	unsigned long flags;   
+	unsigned long flags;
 
 	raw_spin_lock_irqsave(&irq_lock, flags);
 	rtl838x_w32(rtl838x_r32(GIMR) | (1 << ICTL_OFFSET(i->irq)), GIMR);
@@ -68,23 +68,23 @@ static void rtl838x_ictl_enable_irq(struct irq_data *i)
 
 static unsigned int rtl838x_ictl_startup_irq(struct irq_data *i)
 {   
-	rtl838x_ictl_enable_irq(i);   
+	rtl838x_ictl_enable_irq(i);
 	return 0;
 }
 
 static void rtl838x_ictl_disable_irq(struct irq_data *i)
 {   
-	unsigned long flags;   
+	unsigned long flags;
 
-	raw_spin_lock_irqsave(&irq_lock, flags);   
-	rtl838x_w32(rtl838x_r32(GIMR) & (~(1 << ICTL_OFFSET(i->irq))), GIMR);   
+	raw_spin_lock_irqsave(&irq_lock, flags);
+	rtl838x_w32(rtl838x_r32(GIMR) & (~(1 << ICTL_OFFSET(i->irq))), GIMR);
 	raw_spin_unlock_irqrestore(&irq_lock, flags);
 }
 
 
 static void rtl838x_ictl_eoi_irq(struct irq_data *i)
 {   
-	unsigned long flags;   
+	unsigned long flags;
 
 	raw_spin_lock_irqsave(&irq_lock, flags); 
 	rtl838x_w32(rtl838x_r32(GIMR) | (1 << ICTL_OFFSET(i->irq)), GIMR);
@@ -129,42 +129,42 @@ static void rtl8380_wdt_phase1(void)
 */
 
 unsigned int rtl838x_ictl_irq_dispatch1(void)
-{       
-	/* Identify shared IRQ  */     
+{
+	/* Identify shared IRQ  */
 	unsigned int extint_ip = rtl838x_r32(GIMR) & rtl838x_r32(GISR);  
 
-	if (extint_ip & TC1_IP)         
-		do_IRQ(RTL838X_TC1_EXT_IRQ);        
-	else if (extint_ip & UART1_IP)          
-		do_IRQ(RTL838X_UART1_EXT_IRQ);      
-	else            
+	if (extint_ip & TC1_IP)
+		do_IRQ(RTL838X_TC1_EXT_IRQ);
+	else if (extint_ip & UART1_IP)
+		do_IRQ(RTL838X_UART1_EXT_IRQ);
+	else
 		spurious_interrupt();
 
 	return IRQ_HANDLED;
 }
 
 unsigned int rtl838x_ictl_irq_dispatch2(void)
-{                 
-	do_IRQ(RTL838X_UART0_EXT_IRQ);      
+{
+	do_IRQ(RTL838X_UART0_EXT_IRQ);
 	return IRQ_HANDLED;
 }
 
 unsigned int rtl838x_ictl_irq_dispatch3(void)
-{       
-	do_IRQ(RTL838X_SWCORE_EXT_IRQ);     
+{
+	do_IRQ(RTL838X_SWCORE_EXT_IRQ);
 	return IRQ_HANDLED;
 }
 
 unsigned int rtl838x_ictl_irq_dispatch4(void)
-{       
+{
 	/* Identify shared IRQ */
-	unsigned int extint_ip = rtl838x_r32(GIMR) & rtl838x_r32(GISR);             
+	unsigned int extint_ip = rtl838x_r32(GIMR) & rtl838x_r32(GISR);
 
-	if (extint_ip & NIC_IP)              
-		do_IRQ(RTL838X_NIC_EXT_IRQ);        
+	if (extint_ip & NIC_IP)
+		do_IRQ(RTL838X_NIC_EXT_IRQ);
 	else if (extint_ip & GPIO_ABCD_IP)
 		do_IRQ(RTL838X_GPIO_ABCD_EXT_IRQ);  
-        else if ((extint_ip & GPIO_EFGH_IP) && (soc_info.family == RTL8328_FAMILY_ID))                
+	else if ((extint_ip & GPIO_EFGH_IP) && (soc_info.family == RTL8328_FAMILY_ID))
 		do_IRQ(RTL838X_GPIO_EFGH_EXT_IRQ);
 	else if (((soc_info.family == RTL8380_FAMILY_ID) 
 		|| (soc_info.family == RTL8330_FAMILY_ID)) && (extint_ip & WDT_IP1_IP))
@@ -181,54 +181,54 @@ unsigned int rtl838x_ictl_irq_dispatch4(void)
 
 unsigned int rtl838x_ictl_irq_dispatch5(void)
 {
-	do_IRQ(RTL838X_TC0_EXT_IRQ);        
+	do_IRQ(RTL838X_TC0_EXT_IRQ);
 	return IRQ_HANDLED;
 }
 
 asmlinkage void plat_irq_dispatch(void)
 {
-	unsigned int pending;   
+	unsigned int pending;
 
 	pending =  read_c0_cause() & read_c0_status() & ST0_IM;  
 
 	if (pending & CAUSEF_IP7)
 		c0_compare_interrupt(7, NULL);
-	else if (pending & CAUSEF_IP6)               
-		rtl838x_ictl_irq_dispatch5();       
-	else if (pending & CAUSEF_IP5)          
-		rtl838x_ictl_irq_dispatch4();       
-	else if (pending & CAUSEF_IP4)          
-		rtl838x_ictl_irq_dispatch3();       
-	else if (pending & CAUSEF_IP3)          
-		rtl838x_ictl_irq_dispatch2();       
-	else if (pending & CAUSEF_IP2)          
+	else if (pending & CAUSEF_IP6)
+		rtl838x_ictl_irq_dispatch5();
+	else if (pending & CAUSEF_IP5)
+		rtl838x_ictl_irq_dispatch4();
+	else if (pending & CAUSEF_IP4)
+		rtl838x_ictl_irq_dispatch3();
+	else if (pending & CAUSEF_IP3)
+		rtl838x_ictl_irq_dispatch2();
+	else if (pending & CAUSEF_IP2)
 		rtl838x_ictl_irq_dispatch1();
-	else            
+	else
 		spurious_interrupt();
 }
 
 static void __init rtl838x_ictl_irq_init(unsigned int irq_base)
-{       
-	int i;  
+{
+	int i;
 
 	for (i=0; i < RTL838X_IRQ_ICTL_NUM; i++) 
 		irq_set_chip_and_handler(irq_base + i, &rtl838x_ictl_irq, handle_level_irq);
 
-	setup_irq(RTL838X_ICTL1_IRQ, &irq_cascade1);        
-	setup_irq(RTL838X_ICTL2_IRQ, &irq_cascade2);        
-	setup_irq(RTL838X_ICTL3_IRQ, &irq_cascade3);        
-	setup_irq(RTL838X_ICTL4_IRQ, &irq_cascade4);        
+	setup_irq(RTL838X_ICTL1_IRQ, &irq_cascade1);
+	setup_irq(RTL838X_ICTL2_IRQ, &irq_cascade2);
+	setup_irq(RTL838X_ICTL3_IRQ, &irq_cascade3); 
+	setup_irq(RTL838X_ICTL4_IRQ, &irq_cascade4);
 	setup_irq(RTL838X_ICTL5_IRQ, &irq_cascade5);
-        
-	/* Set GIMR, IRR */     
-	rtl838x_w32(TC0_IE | UART0_IE, GIMR);                
+
+	/* Set GIMR, IRR */
+	rtl838x_w32(TC0_IE | UART0_IE, GIMR);
 	rtl838x_w32(IRR0_SETTING, IRR0);
-	rtl838x_w32(IRR1_SETTING, IRR1);     
+	rtl838x_w32(IRR1_SETTING, IRR1);
 	if(soc_info.family  == RTL8328_FAMILY_ID)
 		rtl838x_w32(IRR1_8328_SETTING, IRR1);
 	else
 		rtl838x_w32(IRR1_SETTING, IRR1);
-	rtl838x_w32(IRR2_SETTING, IRR2);     
+	rtl838x_w32(IRR2_SETTING, IRR2);
 	rtl838x_w32(IRR3_SETTING, IRR3);
 }
  

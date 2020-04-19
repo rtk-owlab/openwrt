@@ -21,52 +21,10 @@ struct rtl838x_gpios {
 	int bus_id;
 };
 
-
 /*
-	TODO: TRY TYPE: !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	TODO: TRY TYPE for RST on Zyxel
 	RTL838X_GPIO_PABC_TYPE
 */
-
-// [    8.867598] LED_GBL 2f39ea1b, MODE 8
-/* SEL_2  2
- * P27_24 3
- * 
- * RTL838X_GPIO_PABC_DATA: 2000000 enables PORT LEDs on Zyxel
- * LED_GBL 2f3b8a1b, MODE 8 DIR 2000000, DATA 2000000, CNR ffff ff00
- * On D-Link 1210-16:
- * [   79.561145] LED_GBL 2f3b0b1b, MODE 8 DIR f000000, DATA 2700000
- * 
-*/
-
-//	rtl838x_w32_mask(0, 1, RTL838X_EXTRA_GPIO_CTRL);
-	
-/*	printk("GPIO DIR: %x, %x DATA: %x, %x\n",
-	       rtl838x_r32(RTL838X_EXT_GPIO_DIR_0),
-	       rtl838x_r32(RTL838X_EXT_GPIO_DIR_1),
-	       rtl838x_r32(RTL838X_EXT_GPIO_DATA_0),
-	       rtl838x_r32(RTL838X_EXT_GPIO_DATA_1));
-
-	printk("GPIO DIR2: %x, %x DATA2: %x, %x\n",
-	       rtl838x_r32(RTL838X_EXTRA_GPIO_DIR_0),
-	       rtl838x_r32(RTL838X_EXTRA_GPIO_DIR_1),
-	       rtl838x_r32(RTL838X_EXTRA_GPIO_DATA_0),
-	       rtl838x_r32(RTL838X_EXTRA_GPIO_DATA_1));
-*/
-
-	// REG32(GPIO_PABC_CNR) = val & (  ~((1<<offset) | (1<<offset))   );
-/*	rtl838x_w32(0x000000ff, RTL838X_GPIO_PABC_CNR);
-	rtl838x_w32(0x02000000, RTL838X_GPIO_PABC_DIR);
-	printk("LED_GBL %x, MODE %x DIR %x, DATA %x, CNR %x -\n", rtl838x_r32(RTL838X_LED_GLB_CTRL),
-	       rtl838x_r32(RTL838X_LED_MODE_SEL), rtl838x_r32(RTL838X_GPIO_PABC_DIR),
-	       rtl838x_r32(RTL838X_GPIO_PABC_DATA), rtl838x_r32(RTL838X_GPIO_PABC_CNR));
-*/	
-	// Switch off power 8 -> 0: NOPE, c-> NOPE
-	// rtl838x_w32(0, RTL838X_LED_MODE_SEL);
-	// rtl838x_w32(0xc, RTL838X_LED_MODE_SEL);
-//	rtl838x_w32_mask(7 << 12, 0, RTL838X_LED_GLB_CTRL); // NOPE
-	
-
-
 
 u32 rtl838x_rtl8231_read(u8 bus_id, u32 reg)
 {
@@ -195,6 +153,7 @@ static int rtl838x_direction_input(struct gpio_chip *gc, unsigned offset)
 	/* Internal LED driver does not support input */
 	if (offset >=32 && offset <64) 
 		return -ENOTSUPP;
+
 	if (offset >= 64)
 		return rtl8231_pin_dir(gpios->bus_id, offset - 64, 1);
 	
@@ -221,7 +180,9 @@ static int rtl838x_get_direction(struct gpio_chip *gc, unsigned offset)
 {
 	u32 v = 0;
 	struct rtl838x_gpios *gpios = gpiochip_get_data(gc);
+
 	pr_debug("rtl838x_get_direction: %d\n", offset);
+
 	/* LED driver is direction output by default */
 	if (offset >=32 && offset <64) 
 		return 0;
@@ -241,10 +202,10 @@ static int rtl838x_gpio_get(struct gpio_chip *gc, unsigned offset)
 {
 	u32 v;
 	u16 state = 0;
-	
-*/
 	struct rtl838x_gpios *gpios = gpiochip_get_data(gc);
+
 	pr_debug("rtl838x_get: %d\n", offset);
+
 	/* LED driver */
 	if (offset >=32 && offset <64) {
 		v = rtl838x_r32(RTL838X_LED_GLB_CTRL);
