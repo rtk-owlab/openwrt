@@ -417,73 +417,6 @@ rtl838x_get_tag_protocol(struct dsa_switch *ds, int port)
 	 */
 	return DSA_TAG_PROTO_TRAILER;
 }
-/*
-void rtl838x_fixed_link_update(struct dsa_switch *ds, int port,
-			       struct fixed_phy_status *st)
-{ 
-	int offset = 0;
-	u32 reg;
-	
-	printk("rtl838x_fixed_link_update, port %d\n", port);
-	if ( (port != 24) && (port != 26) ){
-		return;
-	} 
-	if (port == 26)
-		offset = 0x100;
-
-	reg = sw_r32(MAPLE_SDS4_FIB_REG0r + offset);
-	
-	if ( (reg & (1 << 13)) && (!(reg & (1 << 6))) )
-		st->speed = SPEED_100;
-	else
-		st->speed = SPEED_1000;
-	
-	if ( reg & (1 << 8) )
-		st->duplex = DUPLEX_FULL;
-	else
-		st->duplex = DUPLEX_HALF;
-
-	// LINK
-	
-}
-*/
-/*
- * 
-void rtl838x_adjust_link(struct dsa_switch *ds, int port,
-			 struct phy_device *phydev)
-{
-	int offset = 0;
-	u32 reg;
-
-	printk("rtl838x_adjust_link, port %d\n", port);
-	
-	if ( (port != 24) && (port != 26) ){
-		return;
-	} 
-	if (port == 26)
-		offset = 0x100;
-
-	reg = sw_r32(MAPLE_SDS4_FIB_REG0r + offset);
-
-	if ( phydev->speed == SPEED_1000 )
-		reg = (reg & ~(1 << 13)) | (1 << 6);
-	
-	if ( phydev->speed == SPEED_1000 )
-		reg = (reg & ~(1 << 6)) | (1 << 13);
-
-	if ( phydev->duplex == DUPLEX_FULL )
-		reg |= 1 << 8;
-	if ( phydev->duplex == DUPLEX_HALF )
-		reg &= ~(1 << 8);
-
-	// disable autoneg
-	reg &= ~(1 << 8);
-
-	sw_w32(reg, MAPLE_SDS4_FIB_REG0r + offset);
-
-	rtl8380_sds_rst(port);
-}
-*/
 
 static void rtl838x_port_stp_state_get(u32 msti, u32 *state)
 {
@@ -680,6 +613,8 @@ static void rtl838x_vlan_add(struct dsa_switch *ds, int port,
 	printk("rtl838x_vlan_add, port %d, vid_end %d, vid_end %d, flags %x\n",
 	       port, vlan->vid_begin, vlan->vid_end, vlan->flags);
 	return;
+
+
 	if (vlan->vid_begin > 4095 || vlan->vid_end > 4095) {
 		dev_err(priv->dev, "VLAN out of range: %d - %d",
 			vlan->vid_begin, vlan->vid_end);
@@ -888,24 +823,6 @@ static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
 		return;
 	}
 	
-	switch (state->interface) {
-	case PHY_INTERFACE_MODE_RGMII:
-		printk("PHY_INTERFACE_MODE_RGMII\n");
-		/* Fallthrough */
-	case PHY_INTERFACE_MODE_RGMII_TXID:
-		printk("PHY_INTERFACE_MODE_RGMII_TXID\n");
-		break;
-	case PHY_INTERFACE_MODE_MII:
-		printk("PHY_INTERFACE_MODE_MII\n");
-		break;
-	case PHY_INTERFACE_MODE_REVMII:
-		printk("PHY_INTERFACE_MODE_REVMII\n");
-		break;
-	default:
-		/* all other PHYs */
-		printk("Default link state\n");
-	}
-
 	/* Clear id_mode_dis bit, and the existing port mode, let
 	 * RGMII_MODE_EN bet set by mac_link_{up,down}
 	 */
@@ -942,11 +859,11 @@ static void rtl838x_phylink_mac_link_down(struct dsa_switch *ds, int port,
 				     phy_interface_t interface)
 {
 	printk("In rtl838x_phylink_mac_link_down, port %d, mode %d", port, mode);
-	if (port == CPU_PORT)
-		return;
 
 	/* Stop TX/RX to port */
 	sw_w32_mask(0x03, 0, RTL838X_MAC_PORT_CTRL(port));
+	/* Link Down */
+//	sw_w32_mask(2, 0, RTL838X_MAC_FORCE_MODE_CTRL(port));
 }
 
 static void rtl838x_phylink_mac_link_up(struct dsa_switch *ds, int port,
@@ -955,11 +872,9 @@ static void rtl838x_phylink_mac_link_up(struct dsa_switch *ds, int port,
 				   struct phy_device *phydev)
 {
 	printk("In rtl838x_phylink_mac_link_up, port %d, mode %d", port, mode);
-	if (port == CPU_PORT) {
-		/* Restart TX/RX to CPU_PORT */
-		sw_w32(0x03, RTL838X_MAC_PORT_CTRL(CPU_PORT));
-		return;
-	}
+
+	/* Link up */
+//	sw_w32_mask(0, 2, RTL838X_MAC_FORCE_MODE_CTRL(port));
 	/* Restart TX/RX to port */
 	sw_w32_mask(0, 0x03, RTL838X_MAC_PORT_CTRL(port));
 }
@@ -974,6 +889,9 @@ static void rtl838x_phylink_validate(struct dsa_switch *ds, int port,
 
 	if (!phy_interface_mode_is_rgmii(state->interface) &&
 	    state->interface != PHY_INTERFACE_MODE_1000BASEX &&
+	    state->interface != PHY_INTERFACE_MODE_MII &&
+	    state->interface != PHY_INTERFACE_MODE_REVMII &&
+	    state->interface != PHY_INTERFACE_MODE_GMII &&
 	    state->interface != PHY_INTERFACE_MODE_QSGMII &&
 	    state->interface != PHY_INTERFACE_MODE_INTERNAL &&
 	    state->interface != PHY_INTERFACE_MODE_SGMII) {
@@ -992,35 +910,24 @@ static void rtl838x_phylink_validate(struct dsa_switch *ds, int port,
 	phylink_set(mask, Pause);
 	phylink_set(mask, Asym_Pause);
 	
-	switch (state->interface) {
-	case PHY_INTERFACE_MODE_TRGMII:
+	/* With the exclusion of MII and Reverse MII, we support Gigabit,
+	 * including Half duplex
+	 */
+	if (state->interface != PHY_INTERFACE_MODE_MII &&
+	    state->interface != PHY_INTERFACE_MODE_REVMII) {
 		phylink_set(mask, 1000baseT_Full);
-		break;
-	case PHY_INTERFACE_MODE_1000BASEX:
-		phylink_set(mask, 1000baseX_Full);
-		break;
-	case PHY_INTERFACE_MODE_GMII:
-	case PHY_INTERFACE_MODE_RGMII:
-	case PHY_INTERFACE_MODE_RGMII_ID:
-	case PHY_INTERFACE_MODE_RGMII_RXID:
-	case PHY_INTERFACE_MODE_RGMII_TXID:
 		phylink_set(mask, 1000baseT_Half);
-		/* fall through */
-	case PHY_INTERFACE_MODE_SGMII:
-		phylink_set(mask, 1000baseT_Full);
-		phylink_set(mask, 1000baseX_Full);
-		/* fall through */
-	case PHY_INTERFACE_MODE_MII:
-	case PHY_INTERFACE_MODE_RMII:
-	case PHY_INTERFACE_MODE_REVMII:
-	case PHY_INTERFACE_MODE_NA:
-	default:
-		phylink_set(mask, 10baseT_Half);
-		phylink_set(mask, 10baseT_Full);
-		phylink_set(mask, 100baseT_Half);
-		phylink_set(mask, 100baseT_Full);
-		break;
 	}
+
+	phylink_set(mask, 10baseT_Half);
+	phylink_set(mask, 10baseT_Full);
+	phylink_set(mask, 100baseT_Half);
+	phylink_set(mask, 100baseT_Full);
+
+	bitmap_and(supported, supported, mask,
+		   __ETHTOOL_LINK_MODE_MASK_NBITS);
+	bitmap_and(state->advertising, state->advertising, mask,
+		   __ETHTOOL_LINK_MODE_MASK_NBITS);
 }
 
 static int rtl838x_phylink_mac_link_state(struct dsa_switch *ds, int port,
@@ -1154,8 +1061,6 @@ err_out_free_mdiobus:
 static const struct dsa_switch_ops rtl838x_switch_ops = {
 	.get_tag_protocol	= rtl838x_get_tag_protocol,
 	.setup			= rtl838x_setup,
-/*	.adjust_link		= rtl838x_adjust_link,
-	.fixed_link_update	= rtl838x_fixed_link_update,*/
 	.port_vlan_filtering	= rtl838x_vlan_filtering,
 	.port_vlan_prepare	= rtl838x_vlan_prepare,
 	.port_vlan_add		= rtl838x_vlan_add,

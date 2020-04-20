@@ -70,17 +70,24 @@ extern int rtl8380_sds_power(int mac, int val);
 
 static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 {
+	u32 reg;
 	struct net_device *dev = dev_id;
 	struct rtl838x_eth_priv *priv = netdev_priv(dev);
 	u32 status = sw_r32(RTL838X_DMA_IF_INTR_STS);
 	
-/*	printk("i s:%x e:%x\n", status, sw_r32(RTL838X_DMA_IF_INTR_MSK));*/
+//	printk("i s:%x e:%x\n", status, sw_r32(RTL838X_DMA_IF_INTR_MSK));
 	
 	/*  Ignore TX interrupt */
 	if (! (status & 0xffff) ){
 		sw_w32(0x000fffff, RTL838X_DMA_IF_INTR_STS);
 		return IRQ_HANDLED;
 	}
+
+	/* Flash system LED */
+	reg = rtl838x_r32(RTL838X_LED_GLB_CTRL);
+	reg ^= 1 << 15;
+	rtl838x_w32(reg, RTL838X_LED_GLB_CTRL);
+//	printk("RECEIVE\n");
 	
 	/* Disable RX interrupt */
 	sw_w32(0x00000000, RTL838X_DMA_IF_INTR_MSK);
@@ -94,22 +101,20 @@ static void rtl838x_hw_reset(void)
 {	
 	/* Stop TX/RX */
 	sw_w32(0x0, RTL838X_MAC_PORT_CTRL(CPU_PORT));
-	udelay(50 * 1000);
+	mdelay(500);
 
 	/* Reset NIC */
 	sw_w32(0x08, RTL838X_RST_GLB_CTRL_0);
-	udelay(50 * 1000);
+	mdelay(200);
 
 	do {
 		udelay(20);
 	} while (sw_r32(RTL838X_RST_GLB_CTRL_0));
+	mdelay(100);
 
 	/* Restart TX/RX to CPU_PORT */
 	sw_w32(0x03, RTL838X_MAC_PORT_CTRL(CPU_PORT));
 	
-	/* Link up, also 
-	sw_w32_mask(0, 0x03, RTL838X_MAC_FORCE_MODE_CTRL(CPU_PORT)); */
-
 	/* Set Speed, duplex, flow control
 	 * FORCE_EN | LINK_EN | NWAY_EN | DUP_SEL 
 	 * | SPD_SEL = 0b10 | FORCE_FC_EN | PHY_MASTER_SLV_MANUAL_EN 
@@ -227,9 +232,18 @@ static int rtl838x_eth_open(struct net_device *ndev)
 
 static void rtl838x_hw_stop(void)
 {
+	/* CPU-Port: Link down */
+	sw_w32(0x6192D, RTL838X_MAC_FORCE_MODE_CTRL(CPU_PORT));
+	mdelay(100);
+
+	/* Disable traffic */
+	sw_w32_mask(RX_EN | TX_EN, 0, RTL838X_DMA_IF_CTRL);
+	mdelay(200);
+
 	sw_w32(0x00000000, RTL838X_DMA_IF_INTR_MSK);
 	sw_w32(0x000fffff, RTL838X_DMA_IF_INTR_STS);
 	sw_w32(0x00000000, RTL838X_DMA_IF_CTRL);
+	mdelay(200);
 }
 
 static int rtl838x_eth_stop(struct net_device *ndev)
@@ -504,7 +518,7 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 				skb->data[len-2] = 0x10;
 				skb->data[len-1] = 0x00;
 			}
-			
+/*			printk("Port: %d\n", h->cpu_tag[0] & 0x1f);*/
 /*			if (num < 10) {
 				num++;
 				dump_pkt(data, len);
@@ -565,6 +579,10 @@ static void rtl838x_validate(struct phylink_config *config,
 	printk("type: %x\n", (u32) config->dev->type);
 	
 	if (!phy_interface_mode_is_rgmii(state->interface) &&
+	    state->interface != PHY_INTERFACE_MODE_1000BASEX &&
+	    state->interface != PHY_INTERFACE_MODE_MII &&
+	    state->interface != PHY_INTERFACE_MODE_REVMII &&
+	    state->interface != PHY_INTERFACE_MODE_GMII &&
 	    state->interface != PHY_INTERFACE_MODE_QSGMII &&
 	    state->interface != PHY_INTERFACE_MODE_INTERNAL &&
 	    state->interface != PHY_INTERFACE_MODE_SGMII) {
@@ -574,43 +592,30 @@ static void rtl838x_validate(struct phylink_config *config,
 		return;
 	}
 
-	/* switch chip-id? if (priv->id == 0x8382) */
-
 	/* Allow all the expected bits */
 	phylink_set(mask, Autoneg);
 	phylink_set_port_modes(mask);
 	phylink_set(mask, Pause);
 	phylink_set(mask, Asym_Pause);
-	
-	switch (state->interface) {
-	case PHY_INTERFACE_MODE_TRGMII:
+
+	/* With the exclusion of MII and Reverse MII, we support Gigabit,
+	 * including Half duplex
+	 */
+	if (state->interface != PHY_INTERFACE_MODE_MII &&
+	    state->interface != PHY_INTERFACE_MODE_REVMII) {
 		phylink_set(mask, 1000baseT_Full);
-		break;
-	case PHY_INTERFACE_MODE_1000BASEX:
-		phylink_set(mask, 1000baseX_Full);
-		break;
-	case PHY_INTERFACE_MODE_GMII:
-	case PHY_INTERFACE_MODE_RGMII:
-	case PHY_INTERFACE_MODE_RGMII_ID:
-	case PHY_INTERFACE_MODE_RGMII_RXID:
-	case PHY_INTERFACE_MODE_RGMII_TXID:
 		phylink_set(mask, 1000baseT_Half);
-		/* fall through */
-	case PHY_INTERFACE_MODE_SGMII:
-		phylink_set(mask, 1000baseT_Full);
-		phylink_set(mask, 1000baseX_Full);
-		/* fall through */
-	case PHY_INTERFACE_MODE_MII:
-	case PHY_INTERFACE_MODE_RMII:
-	case PHY_INTERFACE_MODE_REVMII:
-	case PHY_INTERFACE_MODE_NA:
-	default:
-		phylink_set(mask, 10baseT_Half);
-		phylink_set(mask, 10baseT_Full);
-		phylink_set(mask, 100baseT_Half);
-		phylink_set(mask, 100baseT_Full);
-		break;
 	}
+
+	phylink_set(mask, 10baseT_Half);
+	phylink_set(mask, 10baseT_Full);
+	phylink_set(mask, 100baseT_Half);
+	phylink_set(mask, 100baseT_Full);
+
+	bitmap_and(supported, supported, mask,
+		   __ETHTOOL_LINK_MODE_MASK_NBITS);
+	bitmap_and(state->advertising, state->advertising, mask,
+		   __ETHTOOL_LINK_MODE_MASK_NBITS);
 }
 
 
@@ -618,79 +623,30 @@ static void rtl838x_mac_config(struct phylink_config *config,
 			       unsigned int mode,
 			       const struct phylink_link_state *state)
 {
-	// struct rtl838x_eth_priv *priv = ds->priv;
-	u32 reg;
-	int port = 8;
-	const char *type;
-
-	printk("In rtl838x_mac_config: %x\n", mode);
-	
-	if(config->dev->init_name)
-		printk("DEV: %s\n", config->dev->init_name);
-	
-	if(config->dev->of_node)
-		printk("DEV: %s\n", config->dev->of_node->full_name);
-	
-	if( !config->dev->type ) {
-		printk("No type\n");
-		return;
-	}
-
-	type = config->dev->type->name;
-	printk("rtl838x_mac_config port %d, type %s\n", port, type);
-	
-	switch (state->interface) {
-	case PHY_INTERFACE_MODE_RGMII:
-		printk("PHY_INTERFACE_MODE_RGMII\n");
-		/* Fallthrough */
-	case PHY_INTERFACE_MODE_RGMII_TXID:
-		printk("PHY_INTERFACE_MODE_RGMII_TXID\n");
-		break;
-	case PHY_INTERFACE_MODE_MII:
-		printk("PHY_INTERFACE_MODE_MII\n");
-		break;
-	case PHY_INTERFACE_MODE_REVMII:
-		printk("PHY_INTERFACE_MODE_REVMII\n");
-		break;
-	default:
-		/* all other PHYs */
-		printk("Default linke state\n");
-	}
-
-	/* Clear id_mode_dis bit, and the existing port mode, let
-	 * RGMII_MODE_EN bet set by mac_link_{up,down}
+	/* This is only being called for the master device,
+	 * i.e. the CPU-Port
 	 */
-	reg = sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(port));
-	reg &= ~(RX_PAUSE_EN | TX_PAUSE_EN);
+
+	printk("In rtl838x_mac_config, mode %x\n", mode);
+	return;
 	
-	if (state->pause & MLO_PAUSE_TXRX_MASK) {
-		if (state->pause & MLO_PAUSE_TX)
-			reg |= TX_PAUSE_EN;
-		reg |= RX_PAUSE_EN;
-	}
-
-	reg &= ~(3 << 4);
-	switch (state->speed) {
-	case SPEED_1000:
-		reg |= 2 << 4;
-		break;
-	case SPEED_100:
-		reg |= 1 << 4;
-		break;
-	}
-
-	reg &= ~(DUPLEX_FULL | FORCE_LINK_EN);
-	if (state->link)
-		reg |= FORCE_LINK_EN;
-	if (state->duplex == DUPLEX_FULL)
-		reg |= DUPLX_MODE;
-
-	sw_w32(reg, RTL838X_MAC_FORCE_MODE_CTRL(port));
+	/* Set Speed, duplex, flow control
+	* FORCE_EN | LINK_EN | NWAY_EN | DUP_SEL 
+	* | SPD_SEL = 0b10 | FORCE_FC_EN | PHY_MASTER_SLV_MANUAL_EN 
+	* | MEDIA_SEL
+	*/
+	sw_w32(0x6192F, RTL838X_MAC_FORCE_MODE_CTRL(CPU_PORT));
+	/* allow CRC errors on CPU-port */
+	sw_w32_mask(0, 0x8, RTL838X_MAC_PORT_CTRL(CPU_PORT));
 }
 
 static void rtl838x_mac_an_restart(struct phylink_config *config)
 {
-	printk("In rtl838x_mac_an_restart, don't know what to do.\n");
+	printk("In rtl838x_mac_an_restart\n");
+	/* Restart by disabling and re-enabling link */
+	sw_w32(0x6192D, RTL838X_MAC_FORCE_MODE_CTRL(CPU_PORT));
+	mdelay(20);
+	sw_w32(0x6192F, RTL838X_MAC_FORCE_MODE_CTRL(CPU_PORT));
 }
 
 static int rtl838x_mac_pcs_get_state(struct phylink_config *config,
@@ -701,13 +657,6 @@ static int rtl838x_mac_pcs_get_state(struct phylink_config *config,
 	const char *type;
 
 	printk("In rtl838x_mac_pcs_get_state\n");
-	if( !config->dev->type ) {
-		printk("No type\n");
-		return 1;
-	}
-
-	type = config->dev->type->name;
-	printk("In rtl838x_mac_pcs_get_state: %s\n", type);
 	
 	state->link = 0;
 	if (sw_r32(RTL838X_MAC_LINK_STS) & (1 << port))
@@ -741,7 +690,21 @@ static int rtl838x_mac_pcs_get_state(struct phylink_config *config,
 
 	return 1;
 }
-	
+
+static void dump_mac_conf(void)
+{
+	int p;
+
+	for (p = 0; p < 9; p++) {
+		printk("%d: %x, force %x\n", p, sw_r32(RTL838X_MAC_PORT_CTRL(p)),
+					sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(p))
+		);
+	}
+	printk("CPU: %x, force %x\n", sw_r32(RTL838X_MAC_PORT_CTRL(CPU_PORT)),
+					sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(CPU_PORT))
+	      );
+}
+
 static void rtl838x_mac_link_down(struct phylink_config *config,
 				  unsigned int mode,
 				  phy_interface_t interface)
@@ -751,6 +714,7 @@ static void rtl838x_mac_link_down(struct phylink_config *config,
 	const char *type;
 
 	printk("In rtl838x_mac_link_down\n");
+	dump_mac_conf();
 	if( !config->dev->type ) {
 		printk("No type\n");
 		return;
@@ -773,6 +737,7 @@ static void rtl838x_mac_link_up(struct phylink_config *config, unsigned int mode
 	printk("In rtl838x_mac_link_up\n");
 	if( !config->dev->type ) {
 		printk("No type\n");
+		dump_mac_conf();
 		return;
 	}
 
@@ -781,6 +746,7 @@ static void rtl838x_mac_link_up(struct phylink_config *config, unsigned int mode
 	
 	/* Restart TX/RX to port */
 	sw_w32_mask(0, 0x03, RTL838X_MAC_PORT_CTRL(port));
+	dump_mac_conf();
 }
 
 static int rtl838x_set_mac_address(struct net_device *dev, void *p)
@@ -951,6 +917,8 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "No DT found\n");
 		return -EINVAL;
 	}
+	dump_mac_conf();
+
 	dev = alloc_etherdev(sizeof(struct rtl838x_eth_priv));
 	if (!dev) {
 		err = -ENOMEM;
