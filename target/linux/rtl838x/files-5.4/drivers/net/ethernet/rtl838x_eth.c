@@ -80,6 +80,7 @@ static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 	/*  Ignore TX interrupt */
 	if (! (status & 0xffff) ){
 		sw_w32(0x000fffff, RTL838X_DMA_IF_INTR_STS);
+//		printk("TRANSMIT\n");
 		return IRQ_HANDLED;
 	}
 
@@ -357,6 +358,7 @@ static int rtl838x_eth_tx(struct sk_buff *skb, struct net_device *dev)
 	int dest_port = -1;
 	
 	len = skb->len;
+//	printk("Sending %d\n", len);
 	/* Check for DSA tagging at the end of the buffer */
 	if (netdev_uses_dsa(dev) && skb->data[len-4] == 0x80 && skb->data[len-3] >0 
 			&& skb->data[len-3] < 28 &&  skb->data[len-2] == 0x10 
@@ -452,7 +454,8 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 	unsigned int val;
 	u32	*last;
 	struct p_hdr *h;
-	
+	bool dsa = netdev_uses_dsa(dev);
+
 	spin_lock_irqsave(&priv->lock, flags);
 	last = (u32 *)KSEG1ADDR(sw_r32(RTL838X_DMA_IF_RX_CUR(r)));
 //	printk("ring %2x (index %2x): current %x, last: %x\n", r, ring->c_rx[r], (u32) &ring->rx_r[r][ring->c_rx[r]], (u32) last);
@@ -481,7 +484,7 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 */		
 		data = (u8 *)KSEG1ADDR(h->buf);
 		len = h->len;
-/*		printk("pkt: %x %x\n", (u32)data, (u32)len);*/
+//		printk("pkt: %x %x\n", (u32)data, (u32)len);
 		if (!len)
 			break;
 		
@@ -493,7 +496,7 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 		
 		len -= 4; /* strip the CRC */
 		/* Add 4 bytes for cpu_tag */
-		if (netdev_uses_dsa(dev))
+		if (dsa)
 			len += 4;
 		
 		skb = alloc_skb(len + 4, GFP_KERNEL);
@@ -512,12 +515,13 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 			mb();
 			memcpy(skb->data, (u8 *)KSEG1ADDR(data), len);
 			/* Overwrite CRC with cpu_tag */
-			if (netdev_uses_dsa(dev)) {
+			if (dsa) {
+//				printk("Port: %d\n", h->cpu_tag[0] & 0x1f);
 				skb->data[len-4] = 0x80;
 				skb->data[len-3] = h->cpu_tag[0] & 0x1f;
 				skb->data[len-2] = 0x10;
 				skb->data[len-1] = 0x00;
-			}
+			} 
 /*			printk("Port: %d\n", h->cpu_tag[0] & 0x1f);*/
 /*			if (num < 10) {
 				num++;
