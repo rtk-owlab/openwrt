@@ -669,7 +669,6 @@ static int rtl8380_configure_rtl8214fc(int mac)
 static int rtl8214fc_match_phy_device(struct phy_device *phydev)
 {
 	int addr = phydev->mdio.addr;
-	printk("rtl8214fc_match_phy_device %d\n", addr);
 	return phydev->phy_id == PHY_ID_RTL8214FC && addr >= 24;
 }
 
@@ -866,9 +865,6 @@ static int rtl8214fc_phy_probe(struct phy_device *phydev)
 {
 	struct device *dev = &phydev->mdio.dev;
 	struct rtl838x_phy_priv *priv;
-	printk("PROBING, bus address: %d", phydev->mdio.addr);
-
-
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
@@ -881,9 +877,6 @@ static int rtl8218b_ext_phy_probe(struct phy_device *phydev)
 {
 	struct device *dev = &phydev->mdio.dev;
 	struct rtl838x_phy_priv *priv;
-	printk("PROBING, bus address: %d", phydev->mdio.addr);
-
-
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
@@ -896,9 +889,6 @@ static int rtl8218b_int_phy_probe(struct phy_device *phydev)
 {
 	struct device *dev = &phydev->mdio.dev;
 	struct rtl838x_phy_priv *priv;
-	printk("PROBING, bus address: %d", phydev->mdio.addr);
-
-
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
