@@ -26,6 +26,8 @@ struct rtl838x_phy_priv {
 
 extern int rtl838x_write_phy(u32 port, u32 page, u32 reg, u32 val);
 extern int rtl838x_read_phy(u32 port, u32 page, u32 reg, u32 *val);
+extern int rtl838x_write_mmd_phy(u32 port, u32 addr, u32 reg, u32 val);
+extern int rtl838x_read_mmd_phy(u32 port, u32 addr, u32 reg, u32 *val);
 
 static void rtl8380_int_phy_on_off(int mac, bool on)
 {
@@ -313,7 +315,6 @@ static int rtl8380_configure_ext_rtl8218b(int mac)
 static int rtl8218b_ext_match_phy_device(struct phy_device *phydev)
 {
 	int addr = phydev->mdio.addr;
-	printk("rtl8218b_ext_match_phy_device %d\n", addr);
 	return phydev->phy_id == PHY_ID_RTL8218B_E && addr < 8;
 }
 
@@ -370,6 +371,27 @@ static u32 rtl8380_rtl8214fc_perport[][2] = {
 	{0x15, 0xe47f}, {0x1f, 0x0009}, {0x15, 0x46f4}, {0x1f, 0x0000}, 
 	{0x1e, 0x0000}, {0, 0}
 };
+
+static int rtl8380_rtl8218b_write_mmd(struct phy_device *phydev,
+				      int devnum, u16 regnum, u16 val)
+{
+	int addr = phydev->mdio.addr;
+	
+	return rtl838x_write_mmd_phy(addr, devnum, regnum, val);
+}
+
+static int rtl8380_rtl8218b_read_mmd(struct phy_device *phydev,
+				     int devnum, u16 regnum)
+{
+	int ret;
+	u32 val;
+	int addr = phydev->mdio.addr;
+
+	ret = rtl838x_read_mmd_phy(addr, devnum, regnum, &val);
+	if (ret)
+		return ret;
+	return val;
+}
 
 static void rtl8380_rtl8214fc_media_set(int mac, bool set_fibre)
 {
@@ -468,13 +490,76 @@ static void rtl8380_rtl8214fc_ldps_set(int mac, struct ethtool_eee *e)
 
 }
 
+static void rtl8380_rtl8218b_eee_set(int port, bool enable)
+{
+	u32 val;
+	bool an_enabled;
+
+	/* Set GPHY page to copper */
+	rtl838x_write_phy(port, 0xa42, 29, 0x0001);
+
+	rtl838x_read_phy(port, 0, 0, &val);
+	an_enabled = val & (1 << 12);
+	
+	/* MAC based EEE */
+	rtl838x_read_phy(port, 0xa43, 25, &val);
+	val &= ~(1 << 5);
+	rtl838x_write_phy(port, 0xa43, 25, val);
+
+	/* 100M / 1000M EEE */
+	if (enable)
+		rtl838x_write_mmd_phy(port, 7, 60, 0x6);
+	else
+		rtl838x_write_mmd_phy(port, 7, 60, 0);
+
+	/* 500M EEE ability */
+	rtl838x_read_phy(port, 0xa42, 20, &val);
+	if (enable)
+		val |= 1 << 7;
+	else
+		val &= ~(1 << 7);
+	rtl838x_write_phy(port, 0xa42, 20, val);
+
+	/* Restart AN if enabled */
+	if (an_enabled) {
+		rtl838x_read_phy(port, 0, 0, &val);
+		val |= (1 << 12) | (1 << 9);
+		rtl838x_write_phy(port, 0, 0, val);
+	}
+	
+	/* GPHY page back to auto*/
+	rtl838x_write_phy(port, 0xa42, 29, 0);
+}
+
+static	int rtl8380_rtl8218b_get_eee(struct phy_device *phydev,
+				     struct ethtool_eee *e)
+{
+	u32 val;
+	int addr = phydev->mdio.addr;
+	printk("In rtl8380_rtl8218b_get_eee %d\n", addr);
+
+	/* Set GPHY page to copper */
+	rtl838x_write_phy(addr, 0xa42, 29, 0x0001);
+
+	rtl838x_read_phy(addr, 0xa43, 25, &val);
+	if(e->eee_enabled && (!!(val & (1 << 5))))
+		e->eee_enabled = !!(val & (1 << 5));
+	else
+		e->eee_enabled = 0;
+
+	/* GPHY page to auto */
+	rtl838x_write_phy(addr, 0xa42, 29, 0x0000);
+
+	return 0;
+}
+
 static void rtl8380_rtl8218b_green_set(int mac, bool enable)
 {
 	u32 val;
-	
+
 	/* Set GPHY page to copper */
 	rtl838x_write_phy(mac, 0xa42, 29, 0x0001);
-	
+
 	rtl838x_write_phy(mac, 0, 27, 0x8011);
 	rtl838x_read_phy(mac, 0, 28, &val);
 	if (enable) {
@@ -486,17 +571,31 @@ static void rtl8380_rtl8218b_green_set(int mac, bool enable)
 		rtl838x_write_phy(mac, 0, 27, 0x8011);
 		rtl838x_write_phy(mac, 0, 28, val);
 	}
-	
+
 	/* GPHY page to auto */
 	rtl838x_write_phy(mac, 0xa42, 29, 0x0000);
-	
 }
 
-static	int rtl8380_rtl8214fc_get_eee(struct phy_device *phydev,
-				      struct ethtool_eee *e)
+static	int rtl8380_rtl8214fc_get_green(struct phy_device *phydev,
+				        struct ethtool_eee *e)
 {
+	u32 val;
 	int addr = phydev->mdio.addr;
-	printk("In rtl8380_rtl8214fc_get_eee %d", addr);
+	printk("In rtl8380_rtl8214fc_get_green %d\n", addr);
+
+	/* Set GPHY page to copper */
+	rtl838x_write_phy(addr, 0xa42, 29, 0x0001);
+
+	rtl838x_write_phy(addr, 0, 27, 0x8011);
+	rtl838x_read_phy(addr, 0, 28, &val);
+	if(e->eee_enabled && (!!(val & (1 << 9))))
+		e->eee_enabled = !!(val & (1 << 9));
+	else
+		e->eee_enabled = 0;
+
+	/* GPHY page to auto */
+	rtl838x_write_phy(addr, 0xa42, 29, 0x0000);
+
 	return 0;
 }
 
@@ -504,16 +603,31 @@ static	int rtl8380_rtl8214fc_set_eee(struct phy_device *phydev,
 				      struct ethtool_eee *e)
 {
 	int addr = phydev->mdio.addr;
-	printk("In rtl8380_rtl8214fc_set_eee, port %d, enabled %d", addr,
+	printk("In rtl8380_rtl8214fc_set_eee, port %d, enabled %d\n", addr,
 	       e->eee_enabled);
-	
+
 	if (rtl8380_rtl8214fc_media_is_fibre(addr)) {
 		netdev_err(phydev->attached_dev, "Port %d configured for FIBRE", addr);
 		return -ENOTSUPP;
 	}
-	
-	rtl8380_rtl8218b_green_set(addr, (bool) e->eee_enabled);
+
+	rtl8380_rtl8218b_eee_set(addr, (bool) e->eee_enabled);
 	return 0;
+}
+
+static	int rtl8380_rtl8214fc_get_eee(struct phy_device *phydev,
+				      struct ethtool_eee *e)
+{
+	int addr = phydev->mdio.addr;
+	printk("In rtl8380_rtl8214fc_get_eee, port %d, enabled %d\n", addr,
+	       e->eee_enabled);
+
+	if (rtl8380_rtl8214fc_media_is_fibre(addr)) {
+		netdev_err(phydev->attached_dev, "Port %d configured for FIBRE", addr);
+		return -ENOTSUPP;
+	}
+
+	return rtl8380_rtl8218b_get_eee(phydev, e);
 }
 
 static	int rtl8380_rtl8218b_set_eee(struct phy_device *phydev,
@@ -522,7 +636,7 @@ static	int rtl8380_rtl8218b_set_eee(struct phy_device *phydev,
 	int addr = phydev->mdio.addr;
 	printk("In rtl8380_rtl8214b_set_eee, port %d, enabled %d", addr,
 	       e->eee_enabled);
-	rtl8380_rtl8218b_green_set(addr, (bool) e->eee_enabled);
+	rtl8380_rtl8218b_eee_set(addr, (bool) e->eee_enabled);
 	return 0;
 }
 
@@ -907,6 +1021,8 @@ static struct phy_driver rtl838x_phy_driver[] = {
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
 		.set_loopback   = genphy_loopback,
+		.read_mmd	= rtl8380_rtl8218b_read_mmd,
+		.write_mmd	= rtl8380_rtl8218b_write_mmd,
 		.set_port  	= rtl8380_rtl8214fc_set_port,
 		.get_port  	= rtl8380_rtl8214fc_get_port,
 		.set_eee  	= rtl8380_rtl8214fc_set_eee,
@@ -921,8 +1037,10 @@ static struct phy_driver rtl838x_phy_driver[] = {
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
 		.set_loopback   = genphy_loopback,
+		.read_mmd	= rtl8380_rtl8218b_read_mmd,
+		.write_mmd	= rtl8380_rtl8218b_write_mmd,
 		.set_eee  	= rtl8380_rtl8218b_set_eee,
-		.get_eee  	= rtl8380_rtl8214fc_get_eee,
+		.get_eee  	= rtl8380_rtl8218b_get_eee,
 	},
 	{
 		PHY_ID_MATCH_MODEL(PHY_ID_RTL8218B_I),
@@ -932,8 +1050,10 @@ static struct phy_driver rtl838x_phy_driver[] = {
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
 		.set_loopback   = genphy_loopback,
+		.read_mmd	= rtl8380_rtl8218b_read_mmd,
+		.write_mmd	= rtl8380_rtl8218b_write_mmd,
 		.set_eee  	= rtl8380_rtl8218b_set_eee,
-		.get_eee  	= rtl8380_rtl8214fc_get_eee,
+		.get_eee  	= rtl8380_rtl8218b_get_eee,
 	}
 };
 

@@ -80,6 +80,11 @@
 #define TX_PAUSE_EN				(1 << 6)
 #define RX_PAUSE_EN				(1 << 7)
 
+/* EEE */
+#define RTL838X_MAC_EEE_ABLTY			(RTL838X_SW_BASE + 0xa1a8)
+#define RTL838X_EEE_PORT_TX_EN			(RTL838X_SW_BASE + 0x014c)
+#define RTL838X_EEE_PORT_RX_EN			(RTL838X_SW_BASE + 0x0150)
+#define RTL8380_EEE_CLK_STOP_CTRL		(RTL838X_SW_BASE + 0x0148)
 
 enum phy_type {
 	PHY_NONE = 0,
@@ -93,6 +98,7 @@ struct rtl838x_port {
 	bool enable;
 	u32 pm;
 	u16 pvid;
+	bool eee_enabled;
 	enum phy_type phy;
 };
 

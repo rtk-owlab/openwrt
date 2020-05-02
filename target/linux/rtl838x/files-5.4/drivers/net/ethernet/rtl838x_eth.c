@@ -84,10 +84,10 @@ static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 		return IRQ_HANDLED;
 	}
 
-	/* Flash system LED */
+	/* Flash system LED
 	reg = rtl838x_r32(RTL838X_LED_GLB_CTRL);
 	reg ^= 1 << 15;
-	rtl838x_w32(reg, RTL838X_LED_GLB_CTRL);
+	rtl838x_w32(reg, RTL838X_LED_GLB_CTRL); */
 //	printk("RECEIVE\n");
 	
 	/* Disable RX interrupt */
@@ -579,8 +579,7 @@ static void rtl838x_validate(struct phylink_config *config,
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
 	int port = CPU_PORT;
 
-	printk("conf: %x, dev: %x\n", (u32) config, (u32) config->dev);
-	printk("type: %x\n", (u32) config->dev->type);
+	printk("In rtl838x_validate\n");
 	
 	if (!phy_interface_mode_is_rgmii(state->interface) &&
 	    state->interface != PHY_INTERFACE_MODE_1000BASEX &&
@@ -658,7 +657,6 @@ static int rtl838x_mac_pcs_get_state(struct phylink_config *config,
 {
 	u32 speed;
 	int port = CPU_PORT;
-	const char *type;
 
 	printk("In rtl838x_mac_pcs_get_state\n");
 	
@@ -801,6 +799,24 @@ static int rtl8380_init_mac(struct rtl838x_eth_priv *priv)
 	return 0;
 }
 
+static int rtl838x_get_link_ksettings(struct net_device *ndev,
+				      struct ethtool_link_ksettings *cmd)
+{
+	struct rtl838x_eth_priv *priv = netdev_priv(ndev);
+	printk("rtl838x_get_link_ksettings called\n");
+
+	return phylink_ethtool_ksettings_get(priv->phylink, cmd);
+}
+
+static int rtl838x_set_link_ksettings(struct net_device *ndev,
+				      const struct ethtool_link_ksettings *cmd)
+{
+	struct rtl838x_eth_priv *priv = netdev_priv(ndev);
+	printk("rtl838x_set_link_ksettings called\n");
+
+	return phylink_ethtool_ksettings_set(priv->phylink, cmd);
+}
+
 
 static int rtl838x_mdio_read(struct mii_bus *bus, int mii_id, int regnum)
 {
@@ -904,6 +920,11 @@ static const struct phylink_mac_ops rtl838x_phylink_ops = {
 	.mac_link_up = rtl838x_mac_link_up,
 };
 
+static const struct ethtool_ops rtl838x_ethtool_ops = {
+	.get_link_ksettings     = rtl838x_get_link_ksettings,
+	.set_link_ksettings     = rtl838x_set_link_ksettings,
+};
+
 static int __init rtl838x_eth_probe(struct platform_device *pdev)
 {
 	struct net_device *dev;
@@ -970,6 +991,8 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	*/
 	dev->irq = 32;
 	priv->id = sw_r32(RTL838X_MODEL_NAME_INFO) >> 16;
+	dev->ethtool_ops = &rtl838x_ethtool_ops;
+
 	
 	switch (priv->id) {
 	case 0x8380:

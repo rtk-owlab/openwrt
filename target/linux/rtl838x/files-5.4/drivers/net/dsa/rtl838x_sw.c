@@ -20,6 +20,8 @@
 #define RTL8380_VERSION_A 'A'
 #define RTL8380_VERSION_B 'B'
 
+DEFINE_MUTEX(smi_lock);
+
 extern void rtl8380_sds_rst(int mac);
 
 struct rtl838x_vlan_info {
@@ -147,14 +149,14 @@ int rtl838x_write_phy(u32 port, u32 page, u32 reg, u32 val)
 {
 	u32 v;
 	u32 park_page;
+	val &= 0xffff;
 
 	if (port > 31 || page > 4095 || reg > 31)
 		return -ENOTSUPP;
-	
-	val &= 0xffff;
-	
+
+	mutex_lock(&smi_lock);
 	if(rtl838x_smi_wait_op(10000))
-		return -ETIMEDOUT;
+		goto timeout;
 
 	sw_w32(1 << port, RTL838X_SMI_ACCESS_PHY_CTRL_0);
 	mdelay(10);
@@ -167,9 +169,14 @@ int rtl838x_write_phy(u32 port, u32 page, u32 reg, u32 val)
 	sw_w32_mask(0, 1, RTL838X_SMI_ACCESS_PHY_CTRL_1);
 
 	if(rtl838x_smi_wait_op(10000))
-		return -ETIMEDOUT;
-	
+		goto timeout;
+
+	mutex_unlock(&smi_lock);
 	return 0;
+
+timeout:
+	mutex_unlock(&smi_lock);
+	return -ETIMEDOUT;
 }
 
 /* 
@@ -183,8 +190,10 @@ int rtl838x_read_phy(u32 port, u32 page, u32 reg, u32 *val)
 	if (port > 31 || page > 4095 || reg > 31)
 		return -ENOTSUPP;
 
+	mutex_lock(&smi_lock);
+
 	if(rtl838x_smi_wait_op(10000))
-		return -ETIMEDOUT;
+		goto timeout;
 		
 
 	sw_w32_mask(0xffff0000, port << 16, RTL838X_SMI_ACCESS_PHY_CTRL_2);
@@ -195,13 +204,93 @@ int rtl838x_read_phy(u32 port, u32 page, u32 reg, u32 *val)
 	sw_w32_mask(0, 1, RTL838X_SMI_ACCESS_PHY_CTRL_1);
 
 	if(rtl838x_smi_wait_op(10000))
-		return -ETIMEDOUT;
+		goto timeout;
 
 	*val = sw_r32(RTL838X_SMI_ACCESS_PHY_CTRL_2) & 0xffff;
 //	printk("PHY-read: port %d reg: %x res: %x\n", port, reg, *val);
 
+	mutex_unlock(&smi_lock);
 	return 0;
+
+timeout:
+	mutex_unlock(&smi_lock);
+	return -ETIMEDOUT;
 }
+
+/*
+ * Write to an mmd register of the PHY
+ */
+int rtl838x_write_mmd_phy(u32 port, u32 addr, u32 reg, u32 val)
+{
+	u32 v;
+	val &= 0xffff;
+
+	mutex_lock(&smi_lock);
+
+	if(rtl838x_smi_wait_op(10000))
+		goto timeout;
+
+	sw_w32(1 << port, RTL838X_SMI_ACCESS_PHY_CTRL_0);
+	mdelay(10);
+
+	sw_w32_mask(0xffff0000, val << 16, RTL838X_SMI_ACCESS_PHY_CTRL_2);
+
+	v = addr << 16 | reg;
+	sw_w32(v, RTL838X_SMI_ACCESS_PHY_CTRL_3);
+	/* mmd-access | write | cmd-start */
+	v = 1 << 1| 1 << 2 | 1;
+	sw_w32(v, RTL838X_SMI_ACCESS_PHY_CTRL_1);
+
+	if(rtl838x_smi_wait_op(10000))
+		goto timeout;
+
+	mutex_unlock(&smi_lock);
+	return 0;
+
+timeout:
+	mutex_unlock(&smi_lock);
+	return -ETIMEDOUT;
+}
+
+/*
+ * Read to an mmd register of the PHY
+ */
+int rtl838x_read_mmd_phy(u32 port, u32 addr, u32 reg, u32 *val)
+{
+	u32 v;
+
+	mutex_lock(&smi_lock);
+
+	if(rtl838x_smi_wait_op(10000))
+		goto timeout;
+
+	sw_w32(1 << port, RTL838X_SMI_ACCESS_PHY_CTRL_0);
+	mdelay(10);
+
+	sw_w32_mask(0xffff0000, port << 16, RTL838X_SMI_ACCESS_PHY_CTRL_2);
+
+	v = addr << 16 | reg;
+	sw_w32(v, RTL838X_SMI_ACCESS_PHY_CTRL_3);
+
+	/* mmd-access | read | cmd-start */
+	v = 1 << 1| 0 << 2 | 1;
+	sw_w32(v, RTL838X_SMI_ACCESS_PHY_CTRL_1);
+
+	if(rtl838x_smi_wait_op(10000))
+		goto timeout;
+
+	*val = sw_r32(RTL838X_SMI_ACCESS_PHY_CTRL_2) & 0xffff;
+/*	printk("PHY-read mmd: port %d, addr %d, reg: %x res: %x\n",
+	port, addr, reg, *val); */
+
+	mutex_unlock(&smi_lock);
+	return 0;
+
+timeout:
+	mutex_unlock(&smi_lock);
+	return -ETIMEDOUT;
+}
+
 static void rtl8380_get_version(struct rtl838x_switch_priv *priv)
 {
 	u32 rw_save, info_save;
@@ -317,7 +406,6 @@ static int rtl8380_enable_phy_polling(struct rtl838x_switch_priv *priv)
 	sw_w32_mask(0, 0x8000, RTL838X_SMI_GLB_CTRL);
 	return 0;
 }
-
 
 void print_matrix(void)
 {
@@ -612,8 +700,6 @@ static void rtl838x_vlan_add(struct dsa_switch *ds, int port,
 
 	printk("rtl838x_vlan_add, port %d, vid_end %d, vid_end %d, flags %x\n",
 	       port, vlan->vid_begin, vlan->vid_end, vlan->flags);
-	return;
-
 
 	if (vlan->vid_begin > 4095 || vlan->vid_end > 4095) {
 		dev_err(priv->dev, "VLAN out of range: %d - %d",
@@ -636,6 +722,7 @@ static void rtl838x_vlan_add(struct dsa_switch *ds, int port,
 			/* Get untagged port memberships of this vlan */
 			rtl838x_vlan_tables_read(v, &info);
 			portmask = info.untagged_ports | (1 << port);
+			printk("Untagged ports, VLAN %d: %x\n", v, portmask);
 			rtl838x_vlan_set_untagged(v, portmask);
 		}
 	} else {
@@ -643,6 +730,7 @@ static void rtl838x_vlan_add(struct dsa_switch *ds, int port,
 			/* Get tagged port memberships of this vlan */
 			rtl838x_vlan_tables_read(v, &info);
 			portmask = info.tagged_ports | (1 << port);
+			printk("Tagged ports, VLAN %d: %x\n", v, portmask);
 			rtl838x_vlan_set_tagged(v, portmask, info.vlan_conf);
 		}
 	}
@@ -801,6 +889,60 @@ static void rtl838x_port_disable(struct dsa_switch *ds, int port)
 	return;
 }
 
+static int rtl838x_get_mac_eee(struct dsa_switch *ds, int port,
+			       struct ethtool_eee *e)
+{
+	struct rtl838x_switch_priv *priv = ds->priv;
+	printk("rtl838x_get_mac_eee, port %d", port);
+	e->supported = SUPPORTED_100baseT_Full | SUPPORTED_1000baseT_Full;
+	if ( sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(port)) & (1 << 9)) {
+		e->advertised |= ADVERTISED_100baseT_Full;
+	}
+
+	if ( sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(port)) & (1 << 10)) {
+		e->advertised |= ADVERTISED_1000baseT_Full;
+	}
+	e->eee_enabled = priv->ports[port].eee_enabled;
+	printk("enabled: %d, active %x\n", e->eee_enabled, e->advertised);
+
+	if (sw_r32(RTL838X_MAC_EEE_ABLTY) & (1 << port)) {
+		e->lp_advertised = ADVERTISED_100baseT_Full;
+		e->lp_advertised |= ADVERTISED_1000baseT_Full;
+	}
+
+	e->eee_active = !! (e->advertised  & e->lp_advertised);
+	printk("active: %d, lp %x\n", e->eee_active, e->lp_advertised);
+
+	return 0;
+}
+
+static int rtl838x_set_mac_eee(struct dsa_switch *ds, int port,
+			       struct ethtool_eee *e)
+{
+	struct rtl838x_switch_priv *priv = ds->priv;
+	printk("rtl838x_set_mac_eee, port %d", port);
+	if (e->eee_enabled) {
+		printk("Globally enabling EEE\n");
+		sw_w32_mask(0x4, 0, RTL838X_SMI_GLB_CTRL);
+	}
+	if (e->eee_enabled) {
+		printk("Enabling EEE for MAC %d\n", port);
+		sw_w32_mask(0, 3 << 9, RTL838X_MAC_FORCE_MODE_CTRL(port));
+		sw_w32_mask(0, 1 << port, RTL838X_EEE_PORT_TX_EN);
+		sw_w32_mask(0, 1 << port, RTL838X_EEE_PORT_RX_EN);
+		priv->ports[port].eee_enabled = true;
+		e->eee_enabled = true;
+	} else {
+		printk("Disabling EEE for MAC %d\n", port);
+		sw_w32_mask(3 << 9, 0, RTL838X_MAC_FORCE_MODE_CTRL(port));
+		sw_w32_mask(1 << port, 0, RTL838X_EEE_PORT_TX_EN);
+		sw_w32_mask(1 << port, 0, RTL838X_EEE_PORT_RX_EN);
+		priv->ports[port].eee_enabled = false;
+		e->eee_enabled = false;
+	}
+	return 0;
+}
+
 static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
 				      unsigned int mode,
 				      const struct phylink_link_state *state)
@@ -823,6 +965,14 @@ static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
 		return;
 	}
 	
+	if (mode == MLO_AN_PHY) {
+		printk("PHY autonegotiates\n");
+	}
+
+	if (mode != MLO_AN_FIXED) {
+		printk("Not fixed\n");
+	}
+
 	/* Clear id_mode_dis bit, and the existing port mode, let
 	 * RGMII_MODE_EN bet set by mac_link_{up,down}
 	 */
@@ -850,7 +1000,10 @@ static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
 		reg |= FORCE_LINK_EN;
 	if (state->duplex == DUPLEX_FULL)
 		reg |= DUPLX_MODE;
-
+	
+	// Disable AN
+	reg &= ~(1 << 2);
+	printk("Setting reg to : %x\n", reg);
 	sw_w32(reg, RTL838X_MAC_FORCE_MODE_CTRL(port));
 }
 
@@ -1083,6 +1236,9 @@ static const struct dsa_switch_ops rtl838x_switch_ops = {
 	.phylink_mac_config	= rtl838x_phylink_mac_config,
 	.phylink_mac_link_down	= rtl838x_phylink_mac_link_down,
 	.phylink_mac_link_up	= rtl838x_phylink_mac_link_up,
+	.set_mac_eee		= rtl838x_set_mac_eee,
+	.get_mac_eee		= rtl838x_get_mac_eee,
+
 };
 
 static int __init rtl838x_sw_probe(struct platform_device *pdev)
