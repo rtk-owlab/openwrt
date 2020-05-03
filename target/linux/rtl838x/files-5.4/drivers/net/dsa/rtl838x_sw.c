@@ -225,6 +225,7 @@ int rtl838x_write_mmd_phy(u32 port, u32 addr, u32 reg, u32 val)
 	u32 v;
 	val &= 0xffff;
 
+	printk("MMD write: port %d, dev %d, reg %d, val %x\n", port, addr, reg, val);
 	mutex_lock(&smi_lock);
 
 	if(rtl838x_smi_wait_op(10000))
@@ -235,8 +236,8 @@ int rtl838x_write_mmd_phy(u32 port, u32 addr, u32 reg, u32 val)
 
 	sw_w32_mask(0xffff0000, val << 16, RTL838X_SMI_ACCESS_PHY_CTRL_2);
 
-	v = addr << 16 | reg;
-	sw_w32(v, RTL838X_SMI_ACCESS_PHY_CTRL_3);
+	sw_w32_mask(0x1f << 16, addr << 16, RTL838X_SMI_ACCESS_PHY_CTRL_3);
+	sw_w32_mask(0xffff, reg, RTL838X_SMI_ACCESS_PHY_CTRL_3);
 	/* mmd-access | write | cmd-start */
 	v = 1 << 1| 1 << 2 | 1;
 	sw_w32(v, RTL838X_SMI_ACCESS_PHY_CTRL_1);
@@ -710,11 +711,10 @@ static void rtl838x_vlan_add(struct dsa_switch *ds, int port,
 	mutex_lock(&priv->reg_mutex);
 
 	if (vlan->flags & BRIDGE_VLAN_INFO_PVID) {
-		/* Set both innter and out PVID of the port */
-		sw_w32( (vlan->vid_begin << 16) | vlan->vid_begin,
-			RTL838X_VLAN_PORT_PB_VLAN(port));
-		mutex_unlock(&priv->reg_mutex);
-		return;
+		for (v = vlan->vid_begin; v <= vlan->vid_end; v++) {
+			/* Set both inner and outer PVID of the port */
+			sw_w32((v << 16) | v, RTL838X_VLAN_PORT_PB_VLAN(port));
+		}
 	}
 
 	if (vlan->flags & BRIDGE_VLAN_INFO_UNTAGGED) {
@@ -740,8 +740,49 @@ static void rtl838x_vlan_add(struct dsa_switch *ds, int port,
 static int rtl838x_vlan_del(struct dsa_switch *ds, int port,
 			    const struct switchdev_obj_port_vlan *vlan)
 {
-	printk("rtl838x_vlan_del, port %d\n", port);
+	struct rtl838x_vlan_info info;
+	struct rtl838x_switch_priv *priv = ds->priv;
+	int v;
+	u32 portmask;
+
+	printk("rtl838x_vlan_del, port %d, vid_end %d, vid_end %d, flags %x\n",
+	       port, vlan->vid_begin, vlan->vid_end, vlan->flags);
+
+	if (vlan->vid_begin > 4095 || vlan->vid_end > 4095) {
+		dev_err(priv->dev, "VLAN out of range: %d - %d",
+			vlan->vid_begin, vlan->vid_end);
+		return -ENOTSUPP;
+	}
+
+	mutex_lock(&priv->reg_mutex);
+
+	for (v = vlan->vid_begin; v <= vlan->vid_end; v++) {
+		/* Reset both inner and out PVID of the port */
+		sw_w32(0, RTL838X_VLAN_PORT_PB_VLAN(port));
+	
+		if (vlan->flags & BRIDGE_VLAN_INFO_UNTAGGED) {
+			/* Get untagged port memberships of this vlan */
+			rtl838x_vlan_tables_read(v, &info);
+			portmask = info.untagged_ports & (~(1 << port));
+			printk("Untagged ports, VLAN %d: %x\n", v, portmask);
+			rtl838x_vlan_set_untagged(v, portmask);
+		}
+	
+		/* Get tagged port memberships of this vlan */
+		rtl838x_vlan_tables_read(v, &info);
+		portmask = info.tagged_ports & (~(1 << port));
+		printk("Tagged ports, VLAN %d: %x\n", v, portmask);
+		rtl838x_vlan_set_tagged(v, portmask, info.vlan_conf);
+	}
+	mutex_unlock(&priv->reg_mutex);
+	
 	return 0;
+}
+
+static int rtl838x_port_fdb_add(struct dsa_switch *ds, int port,
+				const unsigned char *addr, u16 vid)
+{
+	return -EOPNOTSUPP;
 }
 
 static void rtl838x_port_bridge_leave (struct dsa_switch *ds, int port,
@@ -818,14 +859,6 @@ static int rtl838x_port_bridge_join(struct dsa_switch *ds, int port,
 	mutex_unlock(&priv->reg_mutex);
 
 	print_matrix();
-	return 0;
-}
-/*dal_maple_l2_getExistOrFreeL2Entry(uint32 unit, dal_maple_l2_entry_t *pL2_entry, dal_maple_l2_getMethod_t get_method
-        , dal_maple_l2_index_t *pL2_index) */
-static int rtl838x_port_fdb_add(struct dsa_switch *ds, int port,
-			   const unsigned char *addr, u16 vid)
-{
-	
 	return 0;
 }
 
@@ -910,7 +943,7 @@ static int rtl838x_get_mac_eee(struct dsa_switch *ds, int port,
 		e->lp_advertised |= ADVERTISED_1000baseT_Full;
 	}
 
-	e->eee_active = !! (e->advertised  & e->lp_advertised);
+	e->eee_active = !! (e->advertised & e->lp_advertised);
 	printk("active: %d, lp %x\n", e->eee_active, e->lp_advertised);
 
 	return 0;

@@ -441,7 +441,7 @@ static void rtl8380_rtl8214fc_media_set(int mac, bool set_fibre)
 		if ( power & (1 << 11) )
 			rtl838x_write_phy(base, 0xa40, 16, power & ~(1 << 11));
 	} else {
-		printk("Powering off COPPER\n");
+		printk("Powering on COPPER\n");
 		rtl838x_write_phy(base, 0xfff, 29, 1);
 		/* Ensure power is off */
 		rtl838x_read_phy(base, 0xa40, 16, &power);
@@ -485,16 +485,83 @@ static int rtl8380_rtl8214fc_get_port(struct phy_device *phydev)
 	return PORT_MII;
 }
 
-static void rtl8380_rtl8214fc_ldps_set(int mac, struct ethtool_eee *e)
+void rtl8380_rtl8214fc_ldps_set(int mac, struct ethtool_eee *e)
 {
 
 }
 
-static void rtl8380_rtl8218b_eee_set(int port, bool enable)
+
+static void rtl8380_rtl8218b_eee_set_u_boot(int port, bool enable)
 {
 	u32 val;
 	bool an_enabled;
+	
+	/* Set GPHY page to copper */
+	rtl838x_write_phy(port, 0, 30, 0x0001);
+	rtl838x_read_phy(port, 0, 0, &val);
+	an_enabled = val & (1 << 12);
 
+	if (enable) {
+		/* 100/1000M EEE Capability */
+		rtl838x_write_phy(port, 0, 13, 0x0007);
+		rtl838x_write_phy(port, 0, 14, 0x003C);
+		rtl838x_write_phy(port, 0, 13, 0x4007);
+		rtl838x_write_phy(port, 0, 14, 0x0006);
+
+		rtl838x_read_phy(port, 0x0A43, 25, &val);
+		val |= 1 << 4;
+		rtl838x_write_phy(port,0x0A43, 25,val);
+	} else {
+		/* 100/1000M EEE Capability */
+		rtl838x_write_phy(port, 0, 13, 0x0007);
+		rtl838x_write_phy(port, 0, 14, 0x003C);
+		rtl838x_write_phy(port, 0, 13, 0x0007);
+		rtl838x_write_phy(port, 0, 14, 0x0000);
+
+		rtl838x_read_phy(port, 0x0A43, 25, &val);
+		val &= ~(1 << 4);
+		rtl838x_write_phy(port,0x0A43, 25,val);	
+	}
+	
+	/* Restart AN if enabled */
+	if (an_enabled) {
+		rtl838x_read_phy(port, 0, 0, &val);
+		val |= (1 << 12) | (1 << 9);
+		rtl838x_write_phy(port, 0, 0, val);
+	}
+	
+	/* GPHY page back to auto*/
+	rtl838x_write_phy(port, 0xa42, 29, 0);
+}
+
+static	int rtl8380_rtl8218b_get_eee_u_boot(struct phy_device *phydev,
+				            struct ethtool_eee *e)
+{
+	u32 val;
+	int addr = phydev->mdio.addr;
+	printk("In rtl8380_rtl8218b_get_eee_u_boot %d\n", addr);
+
+	/* Set GPHY page to copper */
+	rtl838x_write_phy(addr, 0xa42, 29, 0x0001);
+
+	rtl838x_read_phy(addr, 0xa43, 25, &val);
+	printk("e1: %d e2: %x\n", e->eee_enabled, val);
+	if(e->eee_enabled && (!!(val & (1 << 4))))
+		e->eee_enabled = !!(val & (1 << 4));
+	else
+		e->eee_enabled = 0;
+
+	/* GPHY page to auto */
+	rtl838x_write_phy(addr, 0xa42, 29, 0x0000);
+
+	return 0;
+}
+
+void rtl8380_rtl8218b_eee_set(int port, bool enable)
+{
+	u32 val;
+	bool an_enabled;
+	printk("In rtl8380_rtl8218b_eee_set %d, enable %d\n", port, enable);
 	/* Set GPHY page to copper */
 	rtl838x_write_phy(port, 0xa42, 29, 0x0001);
 
@@ -531,7 +598,7 @@ static void rtl8380_rtl8218b_eee_set(int port, bool enable)
 	rtl838x_write_phy(port, 0xa42, 29, 0);
 }
 
-static	int rtl8380_rtl8218b_get_eee(struct phy_device *phydev,
+int rtl8380_rtl8218b_get_eee(struct phy_device *phydev,
 				     struct ethtool_eee *e)
 {
 	u32 val;
@@ -541,9 +608,12 @@ static	int rtl8380_rtl8218b_get_eee(struct phy_device *phydev,
 	/* Set GPHY page to copper */
 	rtl838x_write_phy(addr, 0xa42, 29, 0x0001);
 
-	rtl838x_read_phy(addr, 0xa43, 25, &val);
-	if(e->eee_enabled && (!!(val & (1 << 5))))
-		e->eee_enabled = !!(val & (1 << 5));
+//	rtl838x_read_phy(addr, 0xa42, 20, &val);
+	
+	rtl838x_read_mmd_phy(addr, 7, 60, &val);
+	printk("e1: %d e2: %x\n", e->eee_enabled, val);
+	if(e->eee_enabled && (!!(val & (1 << 7))))
+		e->eee_enabled = !!(val & (1 << 7));
 	else
 		e->eee_enabled = 0;
 
@@ -553,7 +623,7 @@ static	int rtl8380_rtl8218b_get_eee(struct phy_device *phydev,
 	return 0;
 }
 
-static void rtl8380_rtl8218b_green_set(int mac, bool enable)
+void rtl8380_rtl8218b_green_set(int mac, bool enable)
 {
 	u32 val;
 
@@ -576,7 +646,7 @@ static void rtl8380_rtl8218b_green_set(int mac, bool enable)
 	rtl838x_write_phy(mac, 0xa42, 29, 0x0000);
 }
 
-static	int rtl8380_rtl8214fc_get_green(struct phy_device *phydev,
+int rtl8380_rtl8214fc_get_green(struct phy_device *phydev,
 				        struct ethtool_eee *e)
 {
 	u32 val;
@@ -602,6 +672,7 @@ static	int rtl8380_rtl8214fc_get_green(struct phy_device *phydev,
 static	int rtl8380_rtl8214fc_set_eee(struct phy_device *phydev,
 				      struct ethtool_eee *e)
 {
+	u32 pollMask;
 	int addr = phydev->mdio.addr;
 	printk("In rtl8380_rtl8214fc_set_eee, port %d, enabled %d\n", addr,
 	       e->eee_enabled);
@@ -611,7 +682,10 @@ static	int rtl8380_rtl8214fc_set_eee(struct phy_device *phydev,
 		return -ENOTSUPP;
 	}
 
-	rtl8380_rtl8218b_eee_set(addr, (bool) e->eee_enabled);
+	pollMask = sw_r32(RTL838X_SMI_POLL_CTRL);
+	sw_w32(0, RTL838X_SMI_POLL_CTRL);
+	rtl8380_rtl8218b_eee_set_u_boot(addr, (bool) e->eee_enabled);
+	sw_w32(pollMask, RTL838X_SMI_POLL_CTRL);
 	return 0;
 }
 
@@ -627,16 +701,23 @@ static	int rtl8380_rtl8214fc_get_eee(struct phy_device *phydev,
 		return -ENOTSUPP;
 	}
 
-	return rtl8380_rtl8218b_get_eee(phydev, e);
+	return rtl8380_rtl8218b_get_eee_u_boot(phydev, e);
 }
 
 static	int rtl8380_rtl8218b_set_eee(struct phy_device *phydev,
 				     struct ethtool_eee *e)
 {
+	u32 pollMask;
 	int addr = phydev->mdio.addr;
-	printk("In rtl8380_rtl8214b_set_eee, port %d, enabled %d", addr,
+	printk("In rtl8380_rtl8218b_set_eee, port %d, enabled %d\n", addr,
 	       e->eee_enabled);
-	rtl8380_rtl8218b_eee_set(addr, (bool) e->eee_enabled);
+	
+	printk("Disabling POLLING, first\n");
+	pollMask = sw_r32(RTL838X_SMI_POLL_CTRL);
+	sw_w32(0, RTL838X_SMI_POLL_CTRL);
+	rtl8380_rtl8218b_eee_set_u_boot(addr, (bool) e->eee_enabled);
+	sw_w32(pollMask, RTL838X_SMI_POLL_CTRL);
+	
 	return 0;
 }
 
@@ -1040,7 +1121,7 @@ static struct phy_driver rtl838x_phy_driver[] = {
 		.read_mmd	= rtl8380_rtl8218b_read_mmd,
 		.write_mmd	= rtl8380_rtl8218b_write_mmd,
 		.set_eee  	= rtl8380_rtl8218b_set_eee,
-		.get_eee  	= rtl8380_rtl8218b_get_eee,
+		.get_eee  	= rtl8380_rtl8218b_get_eee_u_boot,
 	},
 	{
 		PHY_ID_MATCH_MODEL(PHY_ID_RTL8218B_I),
@@ -1053,7 +1134,7 @@ static struct phy_driver rtl838x_phy_driver[] = {
 		.read_mmd	= rtl8380_rtl8218b_read_mmd,
 		.write_mmd	= rtl8380_rtl8218b_write_mmd,
 		.set_eee  	= rtl8380_rtl8218b_set_eee,
-		.get_eee  	= rtl8380_rtl8218b_get_eee,
+		.get_eee  	= rtl8380_rtl8218b_get_eee_u_boot,
 	}
 };
 

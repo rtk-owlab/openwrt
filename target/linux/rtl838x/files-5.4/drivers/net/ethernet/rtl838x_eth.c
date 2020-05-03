@@ -70,7 +70,7 @@ extern int rtl8380_sds_power(int mac, int val);
 
 static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 {
-	u32 reg;
+//	u32 reg;
 	struct net_device *dev = dev_id;
 	struct rtl838x_eth_priv *priv = netdev_priv(dev);
 	u32 status = sw_r32(RTL838X_DMA_IF_INTR_STS);
@@ -289,26 +289,7 @@ static void rtl838x_eth_set_multicast_list(struct net_device *dev)
 
 */
 }
-/* Set link ksettings (phy address, speed) for ethtools 
-static int
-rtl838x_ethtool_set_link_ksettings(struct net_device *ndev,
-				  const struct ethtool_link_ksettings *cmd)
-{
-	struct rtl838x_eth_priv *priv = netdev_priv(ndev);
 
-	return phylink_ethtool_ksettings_set(priv->phylink, cmd);
-}
-
-Get link ksettings for ethtools 
-static int
-rtl838x_ethtool_get_link_ksettings(struct net_device *ndev,
-				  struct ethtool_link_ksettings *cmd)
-{
-	struct rtl838x_eth_priv *priv = netdev_priv(ndev);
-
-	return phylink_ethtool_ksettings_get(priv->phylink, cmd);
-}
-*/
 static void rtl838x_eth_tx_timeout(struct net_device *ndev)
 {
 	unsigned long flags;
@@ -711,44 +692,20 @@ static void rtl838x_mac_link_down(struct phylink_config *config,
 				  unsigned int mode,
 				  phy_interface_t interface)
 {
-	int port = 8;
-	
-	const char *type;
-
 	printk("In rtl838x_mac_link_down\n");
-	dump_mac_conf();
-	if( !config->dev->type ) {
-		printk("No type\n");
-		return;
-	}
-
-	type = config->dev->type->name;
-	printk("In rtl838x_mac_link_down: %s\n", type);
-
 	/* Stop TX/RX to port */
-	sw_w32_mask(0x03, 0, RTL838X_MAC_PORT_CTRL(port));
+	sw_w32_mask(0x03, 0, RTL838X_MAC_PORT_CTRL(CPU_PORT));
 }
 
 static void rtl838x_mac_link_up(struct phylink_config *config, unsigned int mode,
 			    phy_interface_t interface,
 			    struct phy_device *phy)
 {
-	int port = 8;
-	const char *type;
-
 	printk("In rtl838x_mac_link_up\n");
-	if( !config->dev->type ) {
-		printk("No type\n");
-		dump_mac_conf();
-		return;
-	}
 
-	type = config->dev->type->name;
-	printk("In rtl838x_mac_link_up: %s\n", type);
-	
 	/* Restart TX/RX to port */
-	sw_w32_mask(0, 0x03, RTL838X_MAC_PORT_CTRL(port));
-	dump_mac_conf();
+	sw_w32_mask(0, 0x03, RTL838X_MAC_PORT_CTRL(CPU_PORT));
+//	dump_mac_conf();
 }
 
 static int rtl838x_set_mac_address(struct net_device *dev, void *p)
