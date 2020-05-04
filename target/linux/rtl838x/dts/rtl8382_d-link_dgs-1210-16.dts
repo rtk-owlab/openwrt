@@ -1,23 +1,40 @@
-// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 /dts-v1/;
 
 #include "rtl838x.dtsi"
 
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/gpio/gpio.h>
+
 / {
-	compatible = "inaba,aml2-17gp", "realtek,rtl838x-soc";
-	model = "INABA Abaniact AML2-17GP";
+	compatible = "d-link,dgs-1210-16", "realtek,rtl838x-soc";
+	model = "D-Link DGS-1210-16 Switch";
+
+	aliases {
+		led-boot = &led_sys;
+		led-failsafe = &led_sys;
+		led-running = &led_sys;
+		led-upgrade = &led_sys;
+	};	
 
 	chosen {
 		bootargs = "console=ttyS0,115200";
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led_sys: sys {
+			label = "dgs-1210-16:green:sys";
+			gpios = <&gpio0 47 GPIO_ACTIVE_LOW>;
+		};
 	};
 };
 
 &spi0 {
 	status = "okay";
-
-	flash@1 {
+	flash@0 {
 		compatible = "jedec,spi-nor";
-		reg = <1>;
+		reg = <0>;
 		spi-max-frequency = <10000000>;
 
 		partitions {
@@ -27,49 +44,49 @@
 
 			partition@0 {
 				label = "u-boot";
-				reg = <0x00000000 0x00080000>;
+				reg = <0x00000000 0x80000>;
 				read-only;
 			};
-
 			partition@80000 {
 				label = "u-boot-env";
-				reg = <0x00080000 0x00010000>;
+				reg = <0x00080000 0x40000>;
 				read-only;
 			};
-
-			partition@90000 {
-				label = "SYSINFO";
-				reg = <0x00090000 0x00010000>;
+			partition@c0000 {
+				label = "u-boot-env2";
+				reg = <0x000c0000 0x40000>;
 				read-only;
 			};
-
-			partition@a0000 {
-				label = "JFFS2_CFG";
-				reg = <0x000a0000 0x00400000>;
+			partition@100000 {
+				label = "kernel";
+				reg = <0x00100000 0x180000>;
 				read-only;
 			};
-
-			partition@4a0000 {
-				label = "JFFS2_LOG";
-				reg = <0x004a0000 0x00100000>;
+			partition@280000 {
+				label = "rootfs1";
+				reg = <0x00280000 0xc00000>;
 				read-only;
 			};
-
-			partition@5a0000 {
-				label = "RUNTIME";
-				reg = <0x005a0000 0x00d30000>;
+			partition@be80000 {
+				label = "kernel2";
+				reg = <0x00e80000 0x180000>;
 				read-only;
 			};
-
-			partition@12d0000 {
-				label = "RUNTIME2";
-				reg = <0x012d0000 0x00d30000>;
-				read-only;
+			partition@1000000 {
+				label = "sysinfo";
+				reg = <0x01000000 0x40000>;
+			};
+			partition@1040000 {
+				label = "rootfs2";
+				reg = <0x01040000 0xc00000>;
+			};
+			partition@1c40000 {
+				label = "jffs2";
+				reg = <0x01c40000 0x3c0000>;
 			};
 		};
 	};
 };
-
 
 &ethernet0 {
 	local-mac-address = [ec ad e0 63 66 d2];

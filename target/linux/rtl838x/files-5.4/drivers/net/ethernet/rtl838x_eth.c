@@ -678,7 +678,7 @@ static void dump_mac_conf(void)
 {
 	int p;
 
-	for (p = 0; p < 9; p++) {
+	for (p = 8; p < 16; p++) {
 		printk("%d: %x, force %x\n", p, sw_r32(RTL838X_MAC_PORT_CTRL(p)),
 					sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(p))
 		);
@@ -899,7 +899,6 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "No DT found\n");
 		return -EINVAL;
 	}
-	dump_mac_conf();
 
 	dev = alloc_etherdev(sizeof(struct rtl838x_eth_priv));
 	if (!dev) {
@@ -947,10 +946,10 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	dev->irq = res->start;
 	*/
 	dev->irq = 32;
-	priv->id = sw_r32(RTL838X_MODEL_NAME_INFO) >> 16;
 	dev->ethtool_ops = &rtl838x_ethtool_ops;
 
-	
+	priv->id = sw_r32(RTL838X_MODEL_NAME_INFO) >> 16;
+	printk("READ: %x\n", priv->id);
 	switch (priv->id) {
 	case 0x8380:
 	printk("Found RTL8380M\n");

@@ -24,7 +24,7 @@ endef
 
 
 define Device/d-link_dgs-1210-16
-  SOC := rtl838x
+  SOC := rtl8382
   IMAGE_SIZE := 7936k
   DEVICE_VENDOR := D-Link
   DEVICE_MODEL := DGS-1210-16
@@ -40,7 +40,7 @@ endef
 TARGET_DEVICES += inaba_aml2-17gp
 
 define Device/tp-link_t2500g-10ts
-  SOC := rtl838x
+  SOC := rtl8380
   IMAGE_SIZE := 7936k
   DEVICE_VENDOR := TP-Link
   DEVICE_MODEL := T2500G-10TS
