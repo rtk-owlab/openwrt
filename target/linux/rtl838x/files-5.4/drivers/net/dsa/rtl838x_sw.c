@@ -362,7 +362,7 @@ int dsa_phy_write(struct dsa_switch *ds, int phy_addr, int phy_reg, u16 val)
 	
 	if (phy_addr >= 24 && phy_addr <= 27 
 	     && priv->ports[24].phy == PHY_RTL838X_SDS) {
-		printk("PHY_write to SDS, port %d\n", phy_addr);
+//		printk("PHY_write to SDS, port %d\n", phy_addr);
 		if (phy_addr == 26)
 			offset = 0x100;
 		sw_w32(val, MAPLE_SDS4_FIB_REG0r + offset + (phy_reg << 2));
@@ -1203,9 +1203,10 @@ static int rtl838x_mdio_probe(struct rtl838x_switch_priv *priv)
 	for_each_node_by_name(dn, "ethernet-phy") {
 		if(of_property_read_u32(dn, "reg", &pn))
 			continue;
-	//	printk("index %d", pn);
+//		printk("index %d", pn);
+		// Check for the integrated SerDes of the RTL8380M first
 		if (of_property_read_bool(dn, "phy-is-integrated")
-			&& of_property_read_bool(dn, "sfp")) {
+			&& priv->id == 0x8380 && pn >= 24) {
 			priv->ports[pn].phy = PHY_RTL838X_SDS;
 		}
 		if (of_property_read_bool(dn, "phy-is-integrated")

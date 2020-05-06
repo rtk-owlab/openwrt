@@ -1030,10 +1030,13 @@ static void rtl8380_configure_serdes(void)
 
 int rtl838x_phy_init(struct rtl838x_switch_priv *priv)
 {
+	// TODO: Use phy_driver configuratin callbacks for this
 	printk("+++++ rtl838x_phy_init\n");
-	
+
 	if (priv->ports[24].phy == PHY_RTL838X_SDS) {
 		rtl8380_configure_serdes();
+	} else {
+		printk("NO SerDes\n");
 	}
 
 	/* Enable PHY control via SoC */
@@ -1043,12 +1046,12 @@ int rtl838x_phy_init(struct rtl838x_switch_priv *priv)
 		printk("Got an external RTL8218B phy at 0!\n");
 		rtl8380_configure_ext_rtl8218b(0);
 	}
-	
+
 	if (priv->ports[8].phy == PHY_RTL8218B_INT) {
 		printk("Got an internal RTL8218B phy at 8!\n");
 		rtl8380_configure_int_rtl8218b(8);
 	}
-	
+
 	if (priv->ports[24].phy == PHY_RTL8214FC) {
 		printk("Got an external PHY_RTL8214FC phy at 24!\n");
 		rtl8380_configure_rtl8214fc(24);

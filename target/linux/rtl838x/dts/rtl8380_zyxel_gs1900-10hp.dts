@@ -135,13 +135,11 @@
 		phy24: ethernet-phy@24 {
 			compatible = "ethernet-phy-ieee802.3-c22";
 			phy-is-integrated;
-			sfp;
 			reg = <24>;
 		};
 		phy26: ethernet-phy@26 {
 			compatible = "ethernet-phy-ieee802.3-c22";
 			phy-is-integrated;
-			sfp;
 			reg = <26>;
 		};
 	};
@@ -157,66 +155,67 @@
 			reg = <8>;
 			label = "lan1";
 			phy-handle = <&phy8>;
-			phy-mode = "qsgmii";
+			phy-mode = "internal";
 		};
 		port@1 {
 			reg = <9>;
 			label = "lan2";
 			phy-handle = <&phy9>;
-			phy-mode = "qsgmii";
+			phy-mode = "internal";
 		};
 		port@2 {
 			reg = <10>;
 			label = "lan3";
 			phy-handle = <&phy10>;
-			phy-mode = "qsgmii";
+			phy-mode = "internal";
 		};
 		port@3 {
 			reg = <11>;
 			label = "lan4";
 			phy-handle = <&phy11>;
-			phy-mode = "qsgmii";
+			phy-mode = "internal";
 		};
 		port@4 {
 			reg = <12>;
 			label = "lan5";
 			phy-handle = <&phy12>;
-			phy-mode = "qsgmii";
+			phy-mode = "internal";
 		};
 		port@5 {
 			reg = <13>;
 			label = "lan6";
 			phy-handle = <&phy13>;
-			phy-mode = "qsgmii";
+			phy-mode = "internal";
 		};
 		port@6 {
 			reg = <14>;
 			label = "lan7";
 			phy-handle = <&phy14>;
-			phy-mode = "qsgmii";
+			phy-mode = "internal";
 		};
 		port@7 {
 			reg = <15>;
 			label = "lan8";
 			phy-handle = <&phy15>;
-			phy-mode = "qsgmii";
+			phy-mode = "internal";
 		};
 	
 		port@24 {
 			reg = <24>;
 			label = "lan9";
-			phy-mode = "qsgmii";
+			phy-mode = "internal";
 			phy-handle = <&phy24>;
 		};
 		port@26 {
 			reg = <26>;
 			label = "lan10";
-			phy-mode = "qsgmii";
+			phy-mode = "internal";
 			phy-handle = <&phy26>;
 		};
 		port@28 {
 			ethernet = <&ethernet0>;
 			reg = <28>;
+			phy-mode = "internal";
 			fixed-link {
 				speed = <1000>;
 				full-duplex;
@@ -224,4 +223,3 @@
 		};
 	};
 };
-

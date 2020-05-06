@@ -778,8 +778,19 @@ static int rtl838x_set_link_ksettings(struct net_device *ndev,
 static int rtl838x_mdio_read(struct mii_bus *bus, int mii_id, int regnum)
 {
 	u32 val;
-	int err = rtl838x_read_phy(mii_id, 0, regnum, &val);
-/*	printk("rtl838x_mdio_read: %d, %d", mii_id, regnum);*/
+	u32 offset = 0;
+	int err;
+	struct rtl838x_eth_priv *priv = bus->priv;
+
+	if (mii_id >= 24 && mii_id <= 27 && priv->id == 0x8380) {
+		if (mii_id == 26)
+			offset = 0x100;
+		val = sw_r32(MAPLE_SDS4_FIB_REG0r + offset + (regnum << 2)) & 0xffff;
+//		printk("PHYread from SDS: port %d reg: %x res: %x\n", mii_id, regnum, val);
+		return val;
+	}
+	err = rtl838x_read_phy(mii_id, 0, regnum, &val);
+//	printk("eth: rtl838x_mdio_read: %d, %d", mii_id, regnum);
 	if(err)
 		return err;
 	return val;
@@ -788,6 +799,16 @@ static int rtl838x_mdio_read(struct mii_bus *bus, int mii_id, int regnum)
 static int rtl838x_mdio_write(struct mii_bus *bus, int mii_id,
 			     int regnum, u16 value)
 {
+	u32 offset = 0;
+	struct rtl838x_eth_priv *priv = bus->priv;
+
+	if (mii_id >= 24 && mii_id <= 27 && priv->id == 0x8380) {
+//		printk("PHYwrite to SDS, port %d\n", mii_id);
+		if (mii_id == 26)
+			offset = 0x100;
+		sw_w32(value, MAPLE_SDS4_FIB_REG0r + offset + (regnum << 2));
+		return 0;
+	}
 	return rtl838x_write_phy(mii_id, 0, regnum, value);
 }
 
@@ -949,7 +970,6 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	dev->ethtool_ops = &rtl838x_ethtool_ops;
 
 	priv->id = sw_r32(RTL838X_MODEL_NAME_INFO) >> 16;
-	printk("READ: %x\n", priv->id);
 	switch (priv->id) {
 	case 0x8380:
 	printk("Found RTL8380M\n");
