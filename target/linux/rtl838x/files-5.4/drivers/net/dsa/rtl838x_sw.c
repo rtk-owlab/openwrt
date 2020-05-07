@@ -86,8 +86,6 @@ static const struct rtl838x_mib_desc rtl838x_mib[] = {
 	MIB_DESC(1, 0x40, "rxMacDiscards")
 };
 
-extern int rtl838x_phy_init(struct rtl838x_switch_priv *priv);
-
 static irqreturn_t rtl838x_switch_irq(int irq, void *dev_id)
 {
 	struct dsa_switch *ds = dev_id;
@@ -1234,8 +1232,6 @@ static int rtl838x_mdio_probe(struct rtl838x_switch_priv *priv)
 		rtl8380_sds_power(24, 1);
 		rtl8380_sds_power(26, 1);
 	}
-
-	rtl838x_phy_init(priv);
 
 	printk("In rtl838x_mdio_probe done\n");
 	return 0;

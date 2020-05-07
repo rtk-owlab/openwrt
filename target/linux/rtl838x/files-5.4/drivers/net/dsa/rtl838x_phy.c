@@ -89,10 +89,11 @@ u32 rtl8218b_6276B_hwEsd_perport[][2] = {
 	{0x1f, 0xbc4}, {0x17, 0xa200}, {0, 0}
 };
 
-static int rtl8380_configure_int_rtl8218b(int mac)
+static int rtl8380_configure_int_rtl8218b(struct phy_device *phydev)
 {
 	u32 val, phy_id;
 	int i, p, ipd_flag;
+	int mac = phydev->mdio.addr;
 
 	rtl838x_read_phy(mac, 0, 2, &val);
 	phy_id = val << 16;
@@ -135,7 +136,7 @@ static int rtl8380_configure_int_rtl8218b(int mac)
 			if (val & 0x40) break;
 		}
 		if (i >= 100) {
-			printk("ERROR: Port %d not ready for patch.\n", p);
+			printk("ERROR: Port %d not ready for patch.\n", mac + p);
 			return -1;
 		}
 	}
@@ -201,10 +202,11 @@ u32 rtl8380_rtl8218b_perport[][2] = {
 	{0x1c, 0x0000},{0x1f, 0x0bc4}, {0x17, 0xb200}, {0, 0}
 };
 
-static int rtl8380_configure_ext_rtl8218b(int mac)
+static int rtl8380_configure_ext_rtl8218b(struct phy_device *phydev)
 {
 	u32 val, ipd, phy_id;
 	int i, l;
+	int mac = phydev->mdio.addr;
 	
 	if (mac != 0 && mac != 16) {
 		pr_err("External RTL8218B must have PHY-IDs 0 or 16!");
@@ -722,10 +724,11 @@ static	int rtl8380_rtl8218b_set_eee(struct phy_device *phydev,
 }
 
 
-static int rtl8380_configure_rtl8214fc(int mac)
+static int rtl8380_configure_rtl8214fc(struct phy_device *phydev)
 {
 	u32 phy_id, val, page = 0;
 	int i, l;
+	int mac = phydev->mdio.addr;
 	
 	rtl838x_read_phy(mac, 0, 2, &val);
 	phy_id = val << 16;
@@ -935,7 +938,7 @@ static u32 rtl8380_sds_release_reset[][2] = {
 	{0, 0}
 };
 
-static void rtl8380_configure_serdes(void)
+static int rtl8380_configure_serdes(void)
 {
 	u32 v;
 	u32 sds_conf_value;
@@ -1025,37 +1028,6 @@ static void rtl8380_configure_serdes(void)
 	/* Fibre port power off, in order to disable LEDs */
 /*	sw_w32_mask( 0, 1 << 11, (volatile void *)0xbb00f800); 
 	sw_w32_mask( 0, 1 << 11, (volatile void *)0xbb00f900);*/
-	
-}
-
-int rtl838x_phy_init(struct rtl838x_switch_priv *priv)
-{
-	// TODO: Use phy_driver configuratin callbacks for this
-	printk("+++++ rtl838x_phy_init\n");
-
-	if (priv->ports[24].phy == PHY_RTL838X_SDS) {
-		rtl8380_configure_serdes();
-	} else {
-		printk("NO SerDes\n");
-	}
-
-	/* Enable PHY control via SoC */
-	sw_w32_mask(0, 1 << 15, RTL838X_SMI_GLB_CTRL);
-
-	if (priv->ports[0].phy == PHY_RTL8218B_EXT) {
-		printk("Got an external RTL8218B phy at 0!\n");
-		rtl8380_configure_ext_rtl8218b(0);
-	}
-
-	if (priv->ports[8].phy == PHY_RTL8218B_INT) {
-		printk("Got an internal RTL8218B phy at 8!\n");
-		rtl8380_configure_int_rtl8218b(8);
-	}
-
-	if (priv->ports[24].phy == PHY_RTL8214FC) {
-		printk("Got an external PHY_RTL8214FC phy at 24!\n");
-		rtl8380_configure_rtl8214fc(24);
-	}
 	return 0;
 }
 
@@ -1063,11 +1035,19 @@ static int rtl8214fc_phy_probe(struct phy_device *phydev)
 {
 	struct device *dev = &phydev->mdio.dev;
 	struct rtl838x_phy_priv *priv;
+	int addr = phydev->mdio.addr;
+
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
 	priv->name = "RTL8214FC";
+
+	/* All base addresses of the PHYs start at multiples of 8 */
+	if(!(addr % 8)) {
+		/* Configuration must be done whil patching still possible */
+		return rtl8380_configure_rtl8214fc(phydev);
+	}
 	return 0;
 }
 
@@ -1075,11 +1055,19 @@ static int rtl8218b_ext_phy_probe(struct phy_device *phydev)
 {
 	struct device *dev = &phydev->mdio.dev;
 	struct rtl838x_phy_priv *priv;
+	int addr = phydev->mdio.addr;
+
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
 	priv->name = "RTL8218B (external)";
+
+	/* All base addresses of the PHYs start at multiples of 8 */
+	if(!(addr % 8)) {
+		/* Configuration must be done whil patching still possible */
+		return rtl8380_configure_ext_rtl8218b(phydev);
+	}
 	return 0;
 }
 
@@ -1087,11 +1075,22 @@ static int rtl8218b_int_phy_probe(struct phy_device *phydev)
 {
 	struct device *dev = &phydev->mdio.dev;
 	struct rtl838x_phy_priv *priv;
+	int addr = phydev->mdio.addr;
+
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
 	priv->name = "RTL8218B (internal)";
+
+	if (addr == 24 && (sw_r32(RTL838X_MODEL_NAME_INFO) >> 16) == 0x8380)
+		return rtl8380_configure_serdes();
+
+	/* All base addresses of the PHYs start at multiples of 8 */
+	if(!(addr % 8)) {
+		/* Configuration must be done whil patching still possible */
+		return rtl8380_configure_int_rtl8218b(phydev);
+	}
 	return 0;
 }
 
