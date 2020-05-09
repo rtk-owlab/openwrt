@@ -1083,6 +1083,7 @@ static int rtl8218b_int_phy_probe(struct phy_device *phydev)
 
 	priv->name = "RTL8218B (internal)";
 
+	/* On the RTL8380M, PHYs 24-27 connect to the internal SerDes */
 	if (addr == 24 && (sw_r32(RTL838X_MODEL_NAME_INFO) >> 16) == 0x8380)
 		return rtl8380_configure_serdes();
 

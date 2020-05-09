@@ -78,20 +78,21 @@ static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 //	printk("i s:%x e:%x\n", status, sw_r32(RTL838X_DMA_IF_INTR_MSK));
 	
 	/*  Ignore TX interrupt */
-	if (! (status & 0xffff) ){
-		sw_w32(0x000fffff, RTL838X_DMA_IF_INTR_STS);
+	if ((status & 0xf0000) ){
 //		printk("TRANSMIT\n");
-		return IRQ_HANDLED;
 	}
 
-	/* Flash system LED
-	reg = rtl838x_r32(RTL838X_LED_GLB_CTRL);
-	reg ^= 1 << 15;
-	rtl838x_w32(reg, RTL838X_LED_GLB_CTRL); */
-//	printk("RECEIVE\n");
+	if (status & 0xffff ) {
+		/* Flash system LED
+		reg = rtl838x_r32(RTL838X_LED_GLB_CTRL);
+		reg ^= 1 << 15;
+		rtl838x_w32(reg, RTL838X_LED_GLB_CTRL); */
+//		printk("RECEIVE %x\n", status);
+
+		/* Disable RX interrupt */
+		sw_w32_mask(0xffff, 0, RTL838X_DMA_IF_INTR_MSK);
+	}
 	
-	/* Disable RX interrupt */
-	sw_w32(0x00000000, RTL838X_DMA_IF_INTR_MSK);
 	/* Clear ISR */
 	sw_w32(0x000fffff, RTL838X_DMA_IF_INTR_STS);
 	napi_schedule(&priv->napi);
@@ -241,6 +242,7 @@ static void rtl838x_hw_stop(void)
 	sw_w32_mask(RX_EN | TX_EN, 0, RTL838X_DMA_IF_CTRL);
 	mdelay(200);
 
+	/* Disable all TX/RX interrupts */
 	sw_w32(0x00000000, RTL838X_DMA_IF_INTR_MSK);
 	sw_w32(0x000fffff, RTL838X_DMA_IF_INTR_STS);
 	sw_w32(0x00000000, RTL838X_DMA_IF_CTRL);
@@ -338,6 +340,7 @@ static int rtl838x_eth_tx(struct sk_buff *skb, struct net_device *dev)
 	struct p_hdr *h;
 	int dest_port = -1;
 	
+	spin_lock_irqsave(&priv->lock, flags);
 	len = skb->len;
 //	printk("Sending %d\n", len);
 	/* Check for DSA tagging at the end of the buffer */
@@ -356,9 +359,10 @@ static int rtl838x_eth_tx(struct sk_buff *skb, struct net_device *dev)
 
 /*	if (num < 10)
 		printk("TX Len: %d c_tx: %d\n", len, ring->c_tx[0]);*/
-	if (skb_padto(skb, len ))
-		return NETDEV_TX_OK;
-
+	if (skb_padto(skb, len )) {
+		ret = NETDEV_TX_OK;
+		goto rxdone;
+	}
 /*	if (num < 10)
 		dump_pkt(skb->data, len);*/
 	num++;
@@ -366,7 +370,6 @@ static int rtl838x_eth_tx(struct sk_buff *skb, struct net_device *dev)
 /*	if (num < 11)
 		printk("TX Before: %x", (u32)ring->tx_r[0][ring->c_tx[0]]); */
 
-	spin_lock_irqsave(&priv->lock, flags);
 	/* We can send this packet if CPU owns the descriptor */
 	if (!(ring->tx_r[0][ring->c_tx[0]] & 0x1)) {
 		/* Set descriptor for tx */
@@ -419,6 +422,7 @@ static int rtl838x_eth_tx(struct sk_buff *skb, struct net_device *dev)
 		dev_warn(&priv->pdev->dev, "Data is owned by switch\n");
 		ret = NETDEV_TX_BUSY;
 	}
+rxdone:
 	spin_unlock_irqrestore(&priv->lock, flags);
 	return ret;
 }
@@ -528,7 +532,7 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 	
 	spin_unlock_irqrestore(&priv->lock, flags);
 	/* Clear ISR */
-	sw_w32(0x000fffff, RTL838X_DMA_IF_INTR_STS);
+//	sw_w32(0x000fffff, RTL838X_DMA_IF_INTR_STS);
 	
 	return work_done;
 }
