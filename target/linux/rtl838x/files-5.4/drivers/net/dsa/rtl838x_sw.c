@@ -610,7 +610,7 @@ static void rtl838x_vlan_set_untagged(u32 vlan, u32 portmask)
 	do { } while (sw_r32(RTL838X_TBL_ACCESS_CTRL_1) & (1 << 15));
 }
 
-static void rtl838x_vlan_profile_dump(int index)
+void rtl838x_vlan_profile_dump(int index)
 {
 	u32 profile;
 
@@ -676,7 +676,7 @@ static int rtl838x_vlan_prepare(struct dsa_switch *ds, int port,
 	mutex_lock(&priv->reg_mutex);
 
 	printk("rtl838x_vlan_prepare, port %d\n", port);
-	rtl838x_vlan_profile_dump(0);
+//	rtl838x_vlan_profile_dump(0);
 
 	rtl838x_vlan_tables_read(1, &info);
 
@@ -856,7 +856,7 @@ static int rtl838x_port_bridge_join(struct dsa_switch *ds, int port,
 	priv->ports[port].pm |= port_bitmap;
 	mutex_unlock(&priv->reg_mutex);
 
-	print_matrix();
+//	print_matrix();
 	return 0;
 }
 

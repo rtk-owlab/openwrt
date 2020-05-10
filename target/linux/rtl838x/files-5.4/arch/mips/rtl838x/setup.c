@@ -40,10 +40,10 @@ static void rtl838x_restart(char *command)
 	pr_info("PLL control register: %x\n", pll);
 	
 	if (pll == 0xefffffff) { // Fix reset for D-Link
-		rtl838x_w32(3, (volatile void *)0xBB000058);
+		rtl838x_w32(3, RTL838X_INT_RW_CTRL);
 		// For D-Link
 		rtl838x_w32_mask(0xC0000000, 0xCFFFFFFF, RTL838X_PLL_CML_CTRL);
-		rtl838x_w32(0, (volatile void *)0xBB000058);
+		rtl838x_w32(0, RTL838X_INT_RW_CTRL);
 	}
 	pll = rtl838x_r32(RTL838X_PLL_CML_CTRL);
 	pr_info("PLL at restart: %x\n", pll);
