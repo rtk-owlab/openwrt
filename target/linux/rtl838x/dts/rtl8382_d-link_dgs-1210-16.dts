@@ -60,17 +60,14 @@
 			partition@100000 {
 				label = "kernel";
 				reg = <0x00100000 0x180000>;
-				read-only;
 			};
 			partition@280000 {
 				label = "rootfs1";
 				reg = <0x00280000 0xc00000>;
-				read-only;
 			};
 			partition@be80000 {
 				label = "kernel2";
 				reg = <0x00e80000 0x180000>;
-				read-only;
 			};
 			partition@1000000 {
 				label = "sysinfo";
