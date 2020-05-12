@@ -712,19 +712,13 @@ static void rtl838x_mac_link_up(struct phylink_config *config, unsigned int mode
 //	dump_mac_conf();
 }
 
-static int rtl838x_set_mac_address(struct net_device *dev, void *p)
+static void rtl838x_set_mac_hw(struct net_device *dev, u8 *mac)
 {
-	const struct sockaddr *addr = p;
 	struct rtl838x_eth_priv *priv = netdev_priv(dev);
 	unsigned long flags;
 
-	u8 *mac = (u8*) (p);
-
-	if(IS_ERR(p))
-		mac = dev->dev_addr;
-
-	printk("In rtl838x_set_mac_address %x %x\n", (uint32_t)priv, (uint32_t) addr);
 	spin_lock_irqsave(&priv->lock, flags);
+	printk("In rtl838x_set_mac_hw\n");
 	sw_w32((mac[0] << 8) | mac[1], RTL838X_MAC);
 	sw_w32((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5], RTL838X_MAC + 4);
 
@@ -735,8 +729,22 @@ static int rtl838x_set_mac_address(struct net_device *dev, void *p)
 	sw_w32((mac[0] << 8) | mac[1], RTL838X_MAC2);
 	sw_w32((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5], RTL838X_MAC2 + 4);
 
-	ether_addr_copy(dev->dev_addr, p);
 	spin_unlock_irqrestore(&priv->lock, flags);
+}
+
+
+static int rtl838x_set_mac_address(struct net_device *dev, void *p)
+{
+	const struct sockaddr *addr = p;
+	u8 *mac = (u8*) (addr->sa_data);
+	
+	if (!is_valid_ether_addr(addr->sa_data))
+		return -EADDRNOTAVAIL;
+
+	memcpy(dev->dev_addr, addr->sa_data, ETH_ALEN);
+	rtl838x_set_mac_hw(dev, mac);
+	
+	printk("Storing %08x %08x\n", sw_r32(RTL838X_MAC), sw_r32(RTL838X_MAC + 4));
 
 	return 0;
 }
@@ -988,15 +996,34 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	
 	rtl8380_init_mac(priv);
 
+	/* try to get mac address in the following order:
+	 * 1) from device tree data
+	 * 2) from internal registers set by bootloader
+	 */
 	mac = of_get_mac_address(pdev->dev.of_node);
-	if (!IS_ERR(mac)) {
-		ether_addr_copy(dev->dev_addr, mac);
+	if (mac) {
+		memcpy(dev->dev_addr, mac, ETH_ALEN);
+		rtl838x_set_mac_hw(dev, (u8 *)mac);
 	} else {
-		printk("Could not read MAC address\n");
-		eth_hw_addr_random(dev);
+		dev->dev_addr[0] = (sw_r32(RTL838X_MAC) >> 8) & 0xff;
+		dev->dev_addr[1] = sw_r32(RTL838X_MAC) & 0xff;
+		dev->dev_addr[2] = (sw_r32(RTL838X_MAC + 4) >> 24) & 0xff;
+		dev->dev_addr[3] = (sw_r32(RTL838X_MAC + 4) >> 16) & 0xff;
+		dev->dev_addr[4] = (sw_r32(RTL838X_MAC + 4) >> 8) & 0xff;
+		dev->dev_addr[5] = sw_r32(RTL838X_MAC + 4) & 0xff;
 	}
-	rtl838x_set_mac_address(dev, (void *)mac);
+	/* if the address is invalid, use a random value */
+	if (!is_valid_ether_addr(dev->dev_addr)) {
+		struct sockaddr sa = { AF_UNSPEC };
 
+		netdev_warn(dev,
+			    "Invalid MAC address, defaulting to random\n");
+		eth_hw_addr_random(dev);
+		memcpy(sa.sa_data, dev->dev_addr, ETH_ALEN);
+		if (rtl838x_set_mac_address(dev, &sa))
+			netdev_warn(dev, "Failed to set MAC address.\n");
+	}
+	printk("Stored %08x %08x\n", sw_r32(RTL838X_MAC), sw_r32(RTL838X_MAC + 4));
 	strcpy(dev->name, "eth%d");
 	dev->netdev_ops = &rtl838x_eth_netdev_ops;
 	priv->pdev = pdev;

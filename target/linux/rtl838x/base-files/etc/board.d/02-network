@@ -1,0 +1,46 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /lib/functions/uci-defaults.sh
+. /lib/functions/system.sh
+
+rtl838x_setup_interfaces()
+{
+	local board="$1"
+
+	case $board in
+	d-link,dgs-1210-16)
+		ucidef_set_interface_lan "lan1 lan2 lan3 lan4 lan5 lan6 lan7 lan8 lan9 lan10 lan11 lan12 lan13 lan14 lan15 lan16 lan17 lan18 lan19 lan20"
+		;;
+	zyxel,gs1900)
+		ucidef_set_interface_lan "lan1 lan2 lan3 lan4 lan5 lan6 lan7 lan8 lan9 lan10"
+		;;
+	*)
+		ucidef_set_interface_lan "lan1"
+		;;
+	esac
+}
+
+rtl838x_setup_macs()
+{
+	local board="$1"
+	local lan_mac=""
+	local wan_mac=""
+	local label_mac=""
+
+	case $board in
+	d-link,dgs-1210-16|\
+	zyxel,gs1900)
+		lan_mac=$(mtd_get_mac_ascii u-boot-env ethaddr)
+		label_mac=$lan_mac
+		;;
+	esac
+}
+
+board_config_update
+board=$(board_name)
+rtl838x_setup_interfaces $board
+rtl838x_setup_macs $board
+board_config_flush
+
+exit 0
