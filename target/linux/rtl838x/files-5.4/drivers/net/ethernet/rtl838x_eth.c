@@ -70,32 +70,40 @@ extern int rtl8380_sds_power(int mac, int val);
 
 static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 {
-//	u32 reg;
+	u32 reg;
 	struct net_device *dev = dev_id;
 	struct rtl838x_eth_priv *priv = netdev_priv(dev);
 	u32 status = sw_r32(RTL838X_DMA_IF_INTR_STS);
 	
+	spin_lock(&priv->lock);
 //	printk("i s:%x e:%x\n", status, sw_r32(RTL838X_DMA_IF_INTR_MSK));
 	
 	/*  Ignore TX interrupt */
 	if ((status & 0xf0000) ){
 //		printk("TRANSMIT\n");
+		/* Clear ISR */
+		sw_w32(0x000f0000, RTL838X_DMA_IF_INTR_STS);
 	}
 
-	if (status & 0xffff ) {
-		/* Flash system LED
+	/* RX buffer run out */
+	if (status & 0x000ff) {
+		pr_warn("RX buffer runout\n");
+		sw_w32(0x000000ff, RTL838X_DMA_IF_INTR_STS);
+	}
+
+	if (status & 0x0ff00) {
+		/* Flash system LED */
 		reg = rtl838x_r32(RTL838X_LED_GLB_CTRL);
 		reg ^= 1 << 15;
-		rtl838x_w32(reg, RTL838X_LED_GLB_CTRL); */
+		rtl838x_w32(reg, RTL838X_LED_GLB_CTRL);
 //		printk("RECEIVE %x\n", status);
 
 		/* Disable RX interrupt */
-		sw_w32_mask(0xffff, 0, RTL838X_DMA_IF_INTR_MSK);
+		sw_w32_mask(0xff00, 0, RTL838X_DMA_IF_INTR_MSK);
+		sw_w32(0x0000ff00, RTL838X_DMA_IF_INTR_STS);
+		napi_schedule(&priv->napi);
 	}
-	
-	/* Clear ISR */
-	sw_w32(0x000fffff, RTL838X_DMA_IF_INTR_STS);
-	napi_schedule(&priv->napi);
+	spin_unlock(&priv->lock);
 	return IRQ_HANDLED;
 }
 
@@ -361,7 +369,7 @@ static int rtl838x_eth_tx(struct sk_buff *skb, struct net_device *dev)
 		printk("TX Len: %d c_tx: %d\n", len, ring->c_tx[0]);*/
 	if (skb_padto(skb, len )) {
 		ret = NETDEV_TX_OK;
-		goto rxdone;
+		goto txdone;
 	}
 /*	if (num < 10)
 		dump_pkt(skb->data, len);*/
@@ -422,7 +430,7 @@ static int rtl838x_eth_tx(struct sk_buff *skb, struct net_device *dev)
 		dev_warn(&priv->pdev->dev, "Data is owned by switch\n");
 		ret = NETDEV_TX_BUSY;
 	}
-rxdone:
+txdone:
 	spin_unlock_irqrestore(&priv->lock, flags);
 	return ret;
 }
@@ -737,13 +745,13 @@ static int rtl838x_set_mac_address(struct net_device *dev, void *p)
 {
 	const struct sockaddr *addr = p;
 	u8 *mac = (u8*) (addr->sa_data);
-	
+
 	if (!is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
 
 	memcpy(dev->dev_addr, addr->sa_data, ETH_ALEN);
 	rtl838x_set_mac_hw(dev, mac);
-	
+
 	printk("Storing %08x %08x\n", sw_r32(RTL838X_MAC), sw_r32(RTL838X_MAC + 4));
 
 	return 0;
@@ -1001,7 +1009,7 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	 * 2) from internal registers set by bootloader
 	 */
 	mac = of_get_mac_address(pdev->dev.of_node);
-	if (mac) {
+	if (!IS_ERR(mac)) {
 		memcpy(dev->dev_addr, mac, ETH_ALEN);
 		rtl838x_set_mac_hw(dev, (u8 *)mac);
 	} else {
@@ -1015,7 +1023,6 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	/* if the address is invalid, use a random value */
 	if (!is_valid_ether_addr(dev->dev_addr)) {
 		struct sockaddr sa = { AF_UNSPEC };
-
 		netdev_warn(dev,
 			    "Invalid MAC address, defaulting to random\n");
 		eth_hw_addr_random(dev);
