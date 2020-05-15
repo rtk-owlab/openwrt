@@ -20,6 +20,13 @@
 #define RTL8380_VERSION_A 'A'
 #define RTL8380_VERSION_B 'B'
 
+extern int cntIRQ1;
+extern int cntIRQ2;
+extern int cntIRQ3;
+extern int cntIRQ4;
+extern int cntIRQ5;
+extern int cntIRQ6;
+
 DEFINE_MUTEX(smi_lock);
 
 extern void rtl8380_sds_rst(int mac);
@@ -98,6 +105,9 @@ static irqreturn_t rtl838x_switch_irq(int irq, void *dev_id)
 	/* Clear status */
 	sw_w32(ports, RTL838X_ISR_PORT_LINK_STS_CHG);
 	printk("Link change: status: %x, ports %x\n", status, ports);
+	printk("IRQ-counters: %d, %d, %d, %d, %d %d\n", cntIRQ1, cntIRQ2, cntIRQ3, cntIRQ4, cntIRQ5, cntIRQ6);
+	printk("RX buffer overrun: status %x, mask: %x\n", status, sw_r32(RTL838X_DMA_IF_INTR_MSK));
+
 	for (i = 0; i < 28; i++) {
 		if (ports & (1 << i)) {
 			link = sw_r32(RTL838X_MAC_LINK_STS);

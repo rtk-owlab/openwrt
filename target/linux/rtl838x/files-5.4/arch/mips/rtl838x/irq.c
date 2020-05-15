@@ -31,6 +31,13 @@ unsigned int rtl838x_ictl_irq_dispatch3(void);
 unsigned int rtl838x_ictl_irq_dispatch4(void);
 unsigned int rtl838x_ictl_irq_dispatch5(void);
 
+int cntIRQ1;
+int cntIRQ2;
+int cntIRQ3;
+int cntIRQ4;
+int cntIRQ5;
+int cntIRQ6;
+
 
 static struct irqaction irq_cascade1 = {
 	.handler = no_action,
@@ -132,6 +139,7 @@ unsigned int rtl838x_ictl_irq_dispatch1(void)
 {
 	/* Identify shared IRQ  */
 	unsigned int extint_ip = rtl838x_r32(GIMR) & rtl838x_r32(GISR);  
+	cntIRQ1++;
 
 	if (extint_ip & TC1_IP)
 		do_IRQ(RTL838X_TC1_EXT_IRQ);
@@ -145,12 +153,14 @@ unsigned int rtl838x_ictl_irq_dispatch1(void)
 
 unsigned int rtl838x_ictl_irq_dispatch2(void)
 {
+	cntIRQ2++;
 	do_IRQ(RTL838X_UART0_EXT_IRQ);
 	return IRQ_HANDLED;
 }
 
 unsigned int rtl838x_ictl_irq_dispatch3(void)
 {
+	cntIRQ3++;
 	do_IRQ(RTL838X_SWCORE_EXT_IRQ);
 	return IRQ_HANDLED;
 }
@@ -160,6 +170,7 @@ unsigned int rtl838x_ictl_irq_dispatch4(void)
 	/* Identify shared IRQ */
 	unsigned int extint_ip = rtl838x_r32(GIMR) & rtl838x_r32(GISR);
 
+	cntIRQ4++;
 	if (extint_ip & NIC_IP)
 		do_IRQ(RTL838X_NIC_EXT_IRQ);
 	else if (extint_ip & GPIO_ABCD_IP)
@@ -181,6 +192,7 @@ unsigned int rtl838x_ictl_irq_dispatch4(void)
 
 unsigned int rtl838x_ictl_irq_dispatch5(void)
 {
+	cntIRQ5++;
 	do_IRQ(RTL838X_TC0_EXT_IRQ);
 	return IRQ_HANDLED;
 }
@@ -189,6 +201,7 @@ asmlinkage void plat_irq_dispatch(void)
 {
 	unsigned int pending;
 
+	cntIRQ6++;
 	pending =  read_c0_cause() & read_c0_status() & ST0_IM;  
 
 	if (pending & CAUSEF_IP7)

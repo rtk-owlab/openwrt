@@ -21,8 +21,8 @@
 #include <asm/mach-rtl838x/mach-rtl838x.h>
 #include "rtl838x_eth.h"
 
-#define RXRINGS		8
-#define RXRINGLEN	32
+#define RXRINGS		2
+#define RXRINGLEN	300
 #define TXRINGS		2
 #define TXRINGLEN	20
 #define TX_EN		0x8
@@ -68,6 +68,37 @@ struct rtl838x_eth_priv {
 extern int rtl838x_phy_init(struct rtl838x_eth_priv *priv);
 extern int rtl8380_sds_power(int mac, int val);
 
+/*
+ * Discard the RX ring-buffers, called as part of the net-ISR
+ * when the buffer runs over
+ * Caller needs to hold priv->lock
+ */
+static void rtl838x_rb_cleanup(struct rtl838x_eth_priv *priv)
+{
+	int r;
+	u32	*last;
+	struct p_hdr *h;
+	struct ring_b *ring = priv->membase;
+
+	for (r = 0; r < RXRINGS; r++) {
+		last = (u32 *)KSEG1ADDR(sw_r32(RTL838X_DMA_IF_RX_CUR(r)));
+		do {
+			if ((ring->rx_r[r][ring->c_rx[r]] & 0x1))
+				break;
+			h = &ring->rx_header[r][ring->c_rx[r]];
+			h->buf = (u8 *)CPHYSADDR(ring->rx_space
+					+ r * ring->c_rx[r] * RING_BUFFER);
+			h->size = RING_BUFFER;
+			h->len = 0;
+			mb();
+
+			ring->rx_r[r][ring->c_rx[r]] = CPHYSADDR(h) | 0x1
+				| (ring->c_rx[r] == (RXRINGLEN-1)? WRAP : 0x1);
+			ring->c_rx[r] = (ring->c_rx[r] + 1) % RXRINGLEN;
+		} while (&ring->rx_r[r][ring->c_rx[r]] != last);
+	}
+}
+
 static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 {
 	u32 reg;
@@ -76,33 +107,35 @@ static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 	u32 status = sw_r32(RTL838X_DMA_IF_INTR_STS);
 	
 	spin_lock(&priv->lock);
-//	printk("i s:%x e:%x\n", status, sw_r32(RTL838X_DMA_IF_INTR_MSK));
-	
+/*	printk("i s:%x e:%x\n", status, sw_r32(RTL838X_DMA_IF_INTR_MSK)); */
 	/*  Ignore TX interrupt */
 	if ((status & 0xf0000) ){
-//		printk("TRANSMIT\n");
+/*		printk("TRANSMIT\n"); */
 		/* Clear ISR */
 		sw_w32(0x000f0000, RTL838X_DMA_IF_INTR_STS);
 	}
 
-	/* RX buffer run out */
-	if (status & 0x000ff) {
-		pr_warn("RX buffer runout\n");
-		sw_w32(0x000000ff, RTL838X_DMA_IF_INTR_STS);
-	}
-
+	/* RX interrupt */
 	if (status & 0x0ff00) {
-		/* Flash system LED */
+/* 		Flash system LED
 		reg = rtl838x_r32(RTL838X_LED_GLB_CTRL);
 		reg ^= 1 << 15;
 		rtl838x_w32(reg, RTL838X_LED_GLB_CTRL);
-//		printk("RECEIVE %x\n", status);
-
+		printk("RECEIVE %x\n", status);
+*/
 		/* Disable RX interrupt */
 		sw_w32_mask(0xff00, 0, RTL838X_DMA_IF_INTR_MSK);
 		sw_w32(0x0000ff00, RTL838X_DMA_IF_INTR_STS);
 		napi_schedule(&priv->napi);
 	}
+
+	/* RX buffer overrun */
+	if (status & 0x000ff) {
+/*		pr_warn("RX buffer overrun: status %x, mask: %x\n", status, sw_r32(RTL838X_DMA_IF_INTR_MSK)); */
+		sw_w32(0x000000ff, RTL838X_DMA_IF_INTR_STS);
+		rtl838x_rb_cleanup(priv);
+	}
+
 	spin_unlock(&priv->lock);
 	return IRQ_HANDLED;
 }
@@ -382,6 +415,7 @@ static int rtl838x_eth_tx(struct sk_buff *skb, struct net_device *dev)
 	if (!(ring->tx_r[0][ring->c_tx[0]] & 0x1)) {
 		/* Set descriptor for tx */
 		h = &ring->tx_header[0][ring->c_tx[0]];
+
 		h->buf = (u8 *)CPHYSADDR(ring->tx_space);
 		h->size = len;
 		h->len = len;
@@ -451,8 +485,10 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 
 	spin_lock_irqsave(&priv->lock, flags);
 	last = (u32 *)KSEG1ADDR(sw_r32(RTL838X_DMA_IF_RX_CUR(r)));
-//	printk("ring %2x (index %2x): current %x, last: %x\n", r, ring->c_rx[r], (u32) &ring->rx_r[r][ring->c_rx[r]], (u32) last);
-	
+
+/*
+	printk("RX ring %2x (index %2x): current %x, last: %x\n", r, ring->c_rx[r], (u32) &ring->rx_r[r][ring->c_rx[r]], (u32) last);
+*/
 	if ( &ring->rx_r[r][ring->c_rx[r]] == last ) {
 		spin_unlock_irqrestore(&priv->lock, flags);
 		return 0;
@@ -477,15 +513,15 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 */		
 		data = (u8 *)KSEG1ADDR(h->buf);
 		len = h->len;
-//		printk("pkt: %x %x\n", (u32)data, (u32)len);
+/*		printk("pkt: %x %x\n", (u32)data, (u32)len); */
+
 		if (!len)
 			break;
-		
-		h->buf = (u8 *)CPHYSADDR(&ring->rx_space);
+		h->buf = (u8 *)CPHYSADDR(ring->rx_space
+				+ r * ring->c_rx[r] * RING_BUFFER);
 		h->size = RING_BUFFER;
 		h->len = 0;
 		work_done++;
-/*		printk("buffer now: %x %x %x\n", (u32)ring->rx_header.buf, (u32)ring->rx_r[0], (u32)ring->rx_r[1]);*/
 		
 		len -= 4; /* strip the CRC */
 		/* Add 4 bytes for cpu_tag */
@@ -499,7 +535,7 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 			/* BUG: Prevent bug */
 			sw_w32(0xffffffff, RTL838X_DMA_IF_RX_RING_SIZE(0));
 			for(i = 0; i < RXRINGS; i++) {
-				/*clear every ring cnt to 0x0*/
+				/* Update each ring cnt */
 				val = sw_r32(RTL838X_DMA_IF_RX_RING_CNTR(i));
 				sw_w32(val, RTL838X_DMA_IF_RX_RING_CNTR(i));
 			}
@@ -537,7 +573,7 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 			= CPHYSADDR(h) | 0x1 | (ring->c_rx[r] == (RXRINGLEN-1)? WRAP : 0x1);
 		ring->c_rx[r] = (ring->c_rx[r] + 1) % RXRINGLEN;
 	} while (&ring->rx_r[r][ring->c_rx[r]] != last);
-	
+
 	spin_unlock_irqrestore(&priv->lock, flags);
 	/* Clear ISR */
 //	sw_w32(0x000fffff, RTL838X_DMA_IF_INTR_STS);
@@ -550,7 +586,7 @@ static int rtl838x_poll_rx(struct napi_struct *napi, int budget)
 	struct rtl838x_eth_priv *priv = container_of(napi, struct rtl838x_eth_priv, napi);
 	int work_done = 0, r = 0;
 
-/*	printk("in rtl838x_poll_rx\n");*/
+/*	printk("in rtl838x_poll_rx, budget: %d\n", budget);*/
 	while (work_done < budget && r < RXRINGS) {
 		work_done += rtl838x_hw_receive(priv->netdev, r);
 		r++;
