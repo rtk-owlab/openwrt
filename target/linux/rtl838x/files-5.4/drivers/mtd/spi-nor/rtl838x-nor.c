@@ -291,9 +291,10 @@ static ssize_t rtl838x_nor_write(struct spi_nor *nor, loff_t to, size_t len,
 
 	while (l >= SPI_MAX_TRANSFER_SIZE) {
 		while(rtl838x_nor_get_SR(rtl838x_nor) & SPI_WIP);
-		do { spi_write_enable(rtl838x_nor); }
-			while (!(rtl838x_nor_get_SR(rtl838x_nor) & SPI_WEL));
-			ret = rtl838x_do_4b_write(rtl838x_nor, to + offset,
+		do {
+			spi_write_enable(rtl838x_nor);
+		} while (!(rtl838x_nor_get_SR(rtl838x_nor) & SPI_WEL));
+		ret = rtl838x_do_4b_write(rtl838x_nor, to + offset,
 				SPI_MAX_TRANSFER_SIZE, buffer+offset, cmd);
 		l -= SPI_MAX_TRANSFER_SIZE;
 		offset += SPI_MAX_TRANSFER_SIZE;
@@ -301,10 +302,11 @@ static ssize_t rtl838x_nor_write(struct spi_nor *nor, loff_t to, size_t len,
 	
 	if (l > 0) {
 		while(rtl838x_nor_get_SR(rtl838x_nor) & SPI_WIP);
-		do { spi_write_enable(rtl838x_nor); }
-			while (!(rtl838x_nor_get_SR(rtl838x_nor) & SPI_WEL));
-			ret = rtl838x_do_4b_write(rtl838x_nor, to+offset ,
-				       len, buffer+offset, cmd);
+		do {
+			spi_write_enable(rtl838x_nor);
+		} while (!(rtl838x_nor_get_SR(rtl838x_nor) & SPI_WEL));
+		ret = rtl838x_do_4b_write(rtl838x_nor, to+offset ,
+					  len, buffer+offset, cmd);
 	}
 
 	return len;
@@ -327,13 +329,17 @@ static ssize_t rtl838x_nor_read(struct spi_nor *nor, loff_t from,
 	/* TODO: do timeout and return error */
 	pr_debug("Waiting for pending writes\n");
 	while(rtl838x_nor_get_SR(rtl838x_nor) & SPI_WIP);
-	
+	do {
+		spi_write_enable(rtl838x_nor);
+	} while (!(rtl838x_nor_get_SR(rtl838x_nor) & SPI_WEL));
+
 	pr_debug("cmd is %d \n", cmd);
 	pr_debug("rtl838x_nor_read addr %.8llx to addr %.8x, cmd %.8x, size %d\n",
 		 from, (u32)buffer, (u32)cmd, length);
 
 	while (l >= SPI_MAX_TRANSFER_SIZE) {
-		rtl838x_do_4bf_read(rtl838x_nor, from + offset, SPI_MAX_TRANSFER_SIZE, buffer+offset, cmd);
+		rtl838x_do_4bf_read(rtl838x_nor, from + offset,
+				    SPI_MAX_TRANSFER_SIZE, buffer+offset, cmd);
 		l -= SPI_MAX_TRANSFER_SIZE;
 		offset += SPI_MAX_TRANSFER_SIZE;
 	}
@@ -342,6 +348,40 @@ static ssize_t rtl838x_nor_read(struct spi_nor *nor, loff_t from,
 		rtl838x_do_4bf_read(rtl838x_nor, from + offset, l, buffer+offset, cmd);
 
 	return length;
+}
+
+static int rtl838x_erase(struct spi_nor *nor, loff_t offs)
+{
+	struct rtl838x_nor *rtl838x_nor = nor->priv;
+	int sfcsr_addr_len = rtl838x_nor->fourByteMode? 0x3 : 0x2;
+	int sfdr_addr_shift = rtl838x_nor->fourByteMode? 0 : 8;
+	uint32_t sfcsr;
+	uint8_t cmd = SPINOR_OP_SE;
+
+	pr_debug("Erasing sector at %llx\n", offs);
+
+	/* Do erase in 4-byte mode on large Macronix chips */
+	if (rtl838x_nor->fourByteMode) {
+		cmd = SPINOR_OP_SE_4B;
+		spi_4b_set(rtl838x_nor, true);
+	}
+	/* TODO: do timeout and return error */
+	while(rtl838x_nor_get_SR(rtl838x_nor) & SPI_WIP);
+	do {
+		spi_write_enable(rtl838x_nor);
+	} while (!(rtl838x_nor_get_SR(rtl838x_nor) & SPI_WEL));
+
+	sfcsr = spi_prep(rtl838x_nor);
+
+	/* Send erase command, command IO-width is 1 (bit 25/26) */
+	spi_w32w(sfcsr | SPI_LEN1 | (0 << 25), SFCSR);
+	spi_w32w(cmd << 24, SFDR);
+
+	/* Send address */
+	spi_w32w(sfcsr | (sfcsr_addr_len << 28) | (0 << 25), SFCSR);
+	spi_w32w(offs << sfdr_addr_shift, SFDR);
+
+	return 0;
 }
 
 static int rtl838x_nor_read_reg(struct spi_nor *nor, u8 opcode, u8 *buf, int len)
@@ -494,8 +534,10 @@ int rtl838x_nor_init(struct rtl838x_nor *rtl838x_nor,
 	nor->write_reg = rtl838x_nor_write_reg;
 	nor->read = rtl838x_nor_read;
 	nor->write = rtl838x_nor_write;
-
+	nor->erase = rtl838x_erase;
 	nor->mtd.name = "rtl838x_nor";
+	nor->erase_opcode = rtl838x_nor->fourByteMode? SPINOR_OP_SE_4B
+					: SPINOR_OP_SE;
 	/* initialized with NULL */
 	ret = rtl838x_spi_nor_scan(nor, NULL);
 	if (ret)
