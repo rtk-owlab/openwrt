@@ -21,10 +21,17 @@
 #include <asm/mach-rtl838x/mach-rtl838x.h>
 #include "rtl838x_eth.h"
 
+/*
+ * Maximum number of RX rings is 8, assigned by switch based on
+ * packet/port priortity (not implemented)
+ * Maximum number of TX rings is 2 (only ring 0 used)
+ * RX ringlength needs to be at least 200, otherwise CPU and Switch
+ * may gridlock.
+ */
 #define RXRINGS		2
 #define RXRINGLEN	300
 #define TXRINGS		2
-#define TXRINGLEN	20
+#define TXRINGLEN	160
 #define TX_EN		0x8
 #define RX_EN		0x4
 #define TX_DO		0x2
@@ -101,7 +108,6 @@ static void rtl838x_rb_cleanup(struct rtl838x_eth_priv *priv)
 
 static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 {
-	u32 reg;
 	struct net_device *dev = dev_id;
 	struct rtl838x_eth_priv *priv = netdev_priv(dev);
 	u32 status = sw_r32(RTL838X_DMA_IF_INTR_STS);
@@ -234,12 +240,6 @@ static void rtl838x_setup_ring_buffer(struct ring_b *ring)
 		/* Last header is wrapping around */
 		ring->tx_r[i][j-1] |= 0x2; 
 		ring->c_tx[i] = 0;
-	}
-	
-	for (i = 0; i < TXRINGS; i++) {
-		for (j=0; j < TXRINGLEN; j++) {
-
-		}
 	}
 }
 
@@ -395,7 +395,7 @@ static int rtl838x_eth_tx(struct sk_buff *skb, struct net_device *dev)
 	}
 	if (len < ETH_ZLEN)
 		len = ETH_ZLEN;
-	/* ASIC expects that packet includes CRC, so we extend 4 bytes */
+	/* ASIC expects that packet includes CRC, so we extend by 4 bytes */
 	len += 4;
 
 /*	if (num < 10)
@@ -575,9 +575,6 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 	} while (&ring->rx_r[r][ring->c_rx[r]] != last);
 
 	spin_unlock_irqrestore(&priv->lock, flags);
-	/* Clear ISR */
-//	sw_w32(0x000fffff, RTL838X_DMA_IF_INTR_STS);
-	
 	return work_done;
 }
 
@@ -788,8 +785,7 @@ static int rtl838x_set_mac_address(struct net_device *dev, void *p)
 	memcpy(dev->dev_addr, addr->sa_data, ETH_ALEN);
 	rtl838x_set_mac_hw(dev, mac);
 
-	printk("Storing %08x %08x\n", sw_r32(RTL838X_MAC), sw_r32(RTL838X_MAC + 4));
-
+	printk("Using MAC %08x%08x\n", sw_r32(RTL838X_MAC), sw_r32(RTL838X_MAC + 4));
 	return 0;
 }
 
@@ -1066,7 +1062,7 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 		if (rtl838x_set_mac_address(dev, &sa))
 			netdev_warn(dev, "Failed to set MAC address.\n");
 	}
-	printk("Stored %08x %08x\n", sw_r32(RTL838X_MAC), sw_r32(RTL838X_MAC + 4));
+	printk("Using MAC %08x%08x\n", sw_r32(RTL838X_MAC), sw_r32(RTL838X_MAC + 4));
 	strcpy(dev->name, "eth%d");
 	dev->netdev_ops = &rtl838x_eth_netdev_ops;
 	priv->pdev = pdev;

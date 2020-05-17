@@ -18,14 +18,14 @@ define Device/Default
   DEVICE_DTS = $$(SOC)_$(1)
   IMAGES := sysupgrade.bin
   SUPPORTED_DEVICES := $(subst _,$(comma),$(1))
-  sysupgrade_bin := append-kernel | append-rootfs | pad-rootfs
-  IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | append-metadata | check-size $$$$(IMAGE_SIZE)
+  sysupgrade_bin := append-kernel | pad-to 64k | append-rootfs | pad-rootfs
+  IMAGE/sysupgrade.bin := append-kernel | pad-to 64k | append-rootfs | pad-rootfs | append-metadata | check-size $$$$(IMAGE_SIZE)
 endef
 
 
 define Device/d-link_dgs-1210-16
   SOC := rtl8382
-  IMAGE_SIZE := 7936k
+  IMAGE_SIZE := 13824k
   DEVICE_VENDOR := D-Link
   DEVICE_MODEL := DGS-1210-16
 endef
@@ -49,7 +49,7 @@ TARGET_DEVICES += tp-link_t2500g-10ts
 
 define Device/zyxel_gs1900-10hp
   SOC := rtl8380
-  IMAGE_SIZE := 7936k
+  IMAGE_SIZE := 6976k
   DEVICE_VENDOR := Zyxel
   DEVICE_MODEL := GS1900-10HP
 endef
