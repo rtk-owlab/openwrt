@@ -28,6 +28,7 @@ define Device/d-link_dgs-1210-16
   IMAGE_SIZE := 13824k
   DEVICE_VENDOR := D-Link
   DEVICE_MODEL := DGS-1210-16
+  DEVICE_PACKAGES := ip-bridge ethtool
 endef
 TARGET_DEVICES += d-link_dgs-1210-16
 
@@ -36,6 +37,7 @@ define Device/inaba_aml2-17gp
   IMAGE_SIZE := 13504k
   DEVICE_VENDOR := INABA
   DEVICE_MODEL := Abaniact AML2-17GP
+  DEVICE_PACKAGES := ip-bridge ethtool
 endef
 TARGET_DEVICES += inaba_aml2-17gp
 
@@ -44,6 +46,7 @@ define Device/tp-link_t2500g-10ts
   IMAGE_SIZE := 7936k
   DEVICE_VENDOR := TP-Link
   DEVICE_MODEL := T2500G-10TS
+  DEVICE_PACKAGES := ip-bridge ethtool
 endef
 TARGET_DEVICES += tp-link_t2500g-10ts
 
@@ -52,6 +55,7 @@ define Device/zyxel_gs1900-10hp
   IMAGE_SIZE := 6976k
   DEVICE_VENDOR := Zyxel
   DEVICE_MODEL := GS1900-10HP
+  DEVICE_PACKAGES := ip-bridge ethtool
 endef
 TARGET_DEVICES += zyxel_gs1900-10hp
 
