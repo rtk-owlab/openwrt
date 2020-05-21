@@ -78,6 +78,7 @@
 			partition@b260000 {
 				label = "runtime";
 				reg = <0x260000 0x6d0000>;
+				compatible = "denx,uimage";
 			};
 			partition@930000 {
 				label = "runtime2";
