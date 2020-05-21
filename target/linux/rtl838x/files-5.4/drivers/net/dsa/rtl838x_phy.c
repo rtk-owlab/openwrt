@@ -224,7 +224,7 @@ static int rtl8380_configure_ext_rtl8218b(struct phy_device *phydev)
 		phydev_err(phydev, "Expected external RTL8218B, found PHY-ID %x\n", val);
 		return -1;
 	}
-	phydev_info(phydev, "Detected external RTL8218B at %d\n", mac);
+	phydev_info(phydev, "Detected external RTL8218B\n");
 
 	rtl838x_read_phy(mac, 0, 0, &val);
 	if ( val & (1 << 11) )
@@ -269,7 +269,7 @@ static int rtl8380_configure_ext_rtl8218b(struct phy_device *phydev)
 				break;
 		}
 		if (l >= 100) {
-			phydev_err(phydev, "Could not patch PHY, port %d\n", mac + i);
+			phydev_err(phydev, "Could not patch PHY\n");
 			return -1;
 		}
 	}
@@ -740,7 +740,7 @@ static int rtl8380_configure_rtl8214fc(struct phy_device *phydev)
 			   val);
 		return -1;
 	}
-	phydev_info(phydev, "Detected external RTL8214FC at %d\n", mac);
+	phydev_info(phydev, "Detected external RTL8214FC\n");
 
 	/* detect phy version */
 	rtl838x_write_phy(mac, 0xfff, 27, 0x0004);

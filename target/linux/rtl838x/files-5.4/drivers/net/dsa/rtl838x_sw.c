@@ -506,6 +506,38 @@ rtl838x_get_tag_protocol(struct dsa_switch *ds, int port)
 	return DSA_TAG_PROTO_TRAILER;
 }
 
+static int rtl838x_get_l2aging(void)
+{
+	int t = sw_r32(RTL838X_L2_CTRL_1) & 0x7fffff;
+	u32 val;
+
+	t = t * 128 / 625; /* Aging time in seconds. 0: L2 aging disabled */
+	pr_info("L2 AGING time: %d sec\n", t);
+	pr_info("Dynamic aging for ports: %x\n", sw_r32(RTL838X_L2_PORT_AGING_OUT));
+	return t;
+}
+
+/*
+ * Set Switch L2 Aging time, t is time in seconds
+ * t = 0: aging is disabled
+ */
+static void rtl838x_set_l2aging(int t)
+{
+	/* Convert time in seconds (max 0x2000000) to internal time value */
+	if (t > 0x2000000)
+		t = 0x7fffff;
+	else
+		t = (t * 625 + 127) / 128;
+
+	sw_w32(t, RTL838X_L2_CTRL_1);
+}
+
+static void rtl838x_fast_age(struct dsa_switch *ds, int port)
+{
+	rtl838x_set_l2aging(180);
+	sw_w32_mask(0, 1 << port, RTL838X_L2_PORT_AGING_OUT);
+}
+
 static void rtl838x_port_stp_state_get(u32 msti, u32 *state)
 {
 	u32 cmd = 1 << 15 /* Execute cmd */
@@ -996,9 +1028,13 @@ static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
 		sw_w32_mask(0, 0x8, RTL838X_MAC_PORT_CTRL(CPU_PORT));
 		return;
 	}
-	
+
+	reg = sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(port));
 	if (mode == MLO_AN_PHY) {
 		printk("PHY autonegotiates\n");
+		reg |= 1 << 2;
+		sw_w32(reg, RTL838X_MAC_FORCE_MODE_CTRL(port));
+		return;
 	}
 
 	if (mode != MLO_AN_FIXED) {
@@ -1008,7 +1044,6 @@ static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
 	/* Clear id_mode_dis bit, and the existing port mode, let
 	 * RGMII_MODE_EN bet set by mac_link_{up,down}
 	 */
-	reg = sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(port));
 	reg &= ~(RX_PAUSE_EN | TX_PAUSE_EN);
 	
 	if (state->pause & MLO_PAUSE_TXRX_MASK) {
@@ -1035,7 +1070,6 @@ static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
 	
 	// Disable AN
 	reg &= ~(1 << 2);
-	printk("Setting reg to : %x\n", reg);
 	sw_w32(reg, RTL838X_MAC_FORCE_MODE_CTRL(port));
 }
 
@@ -1043,12 +1077,8 @@ static void rtl838x_phylink_mac_link_down(struct dsa_switch *ds, int port,
 				     unsigned int mode,
 				     phy_interface_t interface)
 {
-	printk("In rtl838x_phylink_mac_link_down, port %d, mode %d", port, mode);
-
 	/* Stop TX/RX to port */
 	sw_w32_mask(0x03, 0, RTL838X_MAC_PORT_CTRL(port));
-	/* Link Down */
-//	sw_w32_mask(2, 0, RTL838X_MAC_FORCE_MODE_CTRL(port));
 }
 
 static void rtl838x_phylink_mac_link_up(struct dsa_switch *ds, int port,
@@ -1056,10 +1086,6 @@ static void rtl838x_phylink_mac_link_up(struct dsa_switch *ds, int port,
 				   phy_interface_t interface,
 				   struct phy_device *phydev)
 {
-	printk("In rtl838x_phylink_mac_link_up, port %d, mode %d", port, mode);
-
-	/* Link up */
-//	sw_w32_mask(0, 2, RTL838X_MAC_FORCE_MODE_CTRL(port));
 	/* Restart TX/RX to port */
 	sw_w32_mask(0, 0x03, RTL838X_MAC_PORT_CTRL(port));
 }
@@ -1142,9 +1168,11 @@ static int rtl838x_phylink_mac_link_state(struct dsa_switch *ds, int port,
 	case 2:
 		state->speed = SPEED_1000;
 		break;
-	default:
-		state->speed = SPEED_UNKNOWN;
-		break;
+	case 3:
+		if (port == 24 || port == 26) /* Internal serdes */
+			state->speed = SPEED_2500;
+		else
+			state->speed = SPEED_100; /* Is in fact 500Mbit */
 	}
 
 	state->pause &= (MLO_PAUSE_RX | MLO_PAUSE_TX);
@@ -1252,6 +1280,7 @@ static const struct dsa_switch_ops rtl838x_switch_ops = {
 	.port_bridge_join	= rtl838x_port_bridge_join,
 	.port_bridge_leave	= rtl838x_port_bridge_leave,
 	.port_stp_state_set	= rtl838x_port_stp_state_set,
+	.port_fast_age		= rtl838x_fast_age,
 	.port_fdb_add		= rtl838x_port_fdb_add,
 	.port_fdb_del		= rtl838x_port_fdb_del,
 	.port_fdb_dump		= rtl838x_port_fdb_dump,
@@ -1279,7 +1308,7 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 //	struct rtl838x_vlan_info info;
 
-	printk("Probing RTL838X switch device\n");
+	pr_info("Probing RTL838X switch device\n");
 	if (!pdev->dev.of_node) {
 		dev_err(dev, "No DT found\n");
 		return -EINVAL;
@@ -1326,6 +1355,8 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 		dev_err(dev, "Error setting up switch interrupt.\n");
 		/* Need to free allocated switch here */
 	}
+
+	rtl838x_get_l2aging();
 
 	return err;
 }
