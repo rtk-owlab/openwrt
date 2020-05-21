@@ -1062,7 +1062,7 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 		if (rtl838x_set_mac_address(dev, &sa))
 			netdev_warn(dev, "Failed to set MAC address.\n");
 	}
-	printk("Using MAC %08x%08x\n", sw_r32(RTL838X_MAC), sw_r32(RTL838X_MAC + 4));
+	pr_info("Using MAC %08x%08x\n", sw_r32(RTL838X_MAC), sw_r32(RTL838X_MAC + 4));
 	strcpy(dev->name, "eth%d");
 	dev->netdev_ops = &rtl838x_eth_netdev_ops;
 	priv->pdev = pdev;
