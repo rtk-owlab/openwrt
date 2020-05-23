@@ -28,7 +28,7 @@ define Device/d-link_dgs-1210-16
   IMAGE_SIZE := 13824k
   DEVICE_VENDOR := D-Link
   DEVICE_MODEL := DGS-1210-16
-  DEVICE_PACKAGES := ip-bridge ethtool
+  DEVICE_PACKAGES := ip-full ip-bridge ethtool tc
 endef
 TARGET_DEVICES += d-link_dgs-1210-16
 
@@ -46,7 +46,7 @@ define Device/tp-link_t2500g-10ts
   IMAGE_SIZE := 7936k
   DEVICE_VENDOR := TP-Link
   DEVICE_MODEL := T2500G-10TS
-  DEVICE_PACKAGES := ip-bridge ethtool
+  DEVICE_PACKAGES := ip-full ip-bridge ethtool
 endef
 TARGET_DEVICES += tp-link_t2500g-10ts
 

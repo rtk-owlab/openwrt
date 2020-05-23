@@ -509,7 +509,7 @@ rtl838x_get_tag_protocol(struct dsa_switch *ds, int port)
 static int rtl838x_get_l2aging(void)
 {
 	int t = sw_r32(RTL838X_L2_CTRL_1) & 0x7fffff;
-	u32 val;
+	printk("RTL838X_L2_CTRL_1 %x\n", sw_r32(RTL838X_L2_CTRL_1));
 
 	t = t * 128 / 625; /* Aging time in seconds. 0: L2 aging disabled */
 	pr_info("L2 AGING time: %d sec\n", t);
@@ -518,24 +518,300 @@ static int rtl838x_get_l2aging(void)
 }
 
 /*
- * Set Switch L2 Aging time, t is time in seconds
+ * Set Switch L2 Aging time, t is time in milliseconds
  * t = 0: aging is disabled
  */
-static void rtl838x_set_l2aging(int t)
+static int rtl838x_set_l2aging(struct dsa_switch *ds, u32 t)
 {
-	/* Convert time in seconds (max 0x2000000) to internal time value */
-	if (t > 0x2000000)
+	/* Convert time in mseconds to internal value */
+	if (t > 0x10000000) /* Set to maximum */
 		t = 0x7fffff;
 	else
-		t = (t * 625 + 127) / 128;
+		t = ((t * 625) / 1000 + 127) / 128;
 
 	sw_w32(t, RTL838X_L2_CTRL_1);
+	
+	return 0;
 }
 
 static void rtl838x_fast_age(struct dsa_switch *ds, int port)
 {
-	rtl838x_set_l2aging(180);
+	printk("FAST AGE port %d\n", port);
 	sw_w32_mask(0, 1 << port, RTL838X_L2_PORT_AGING_OUT);
+	sw_w32_mask(0, 1 << 23, RTL838X_L2_CTRL_1);
+}
+
+/*
+ * Applies the same hash algorithm as the one used currently by the ASIC
+ */
+static u32 rtl838x_hash(u64 seed)
+{
+	u32 h1, h2, h3, h;
+
+	if (sw_r32(RTL838X_L2_CTRL_0) & 1) {
+		h1 = (seed >> 11) & 0x7ff;
+		h1 = ((h1 & 0x1f) << 6) | ((h1 >> 5) & 0x3f);
+		
+		h2 = (seed >> 33) & 0x7ff;
+		h2 = ((h2 & 0x3f) << 5) | ((h2 >> 6) & 0x1f);
+		
+		h3 = (seed >> 44) & 0x7ff;
+		h3 = ((h3 & 0x7f) << 4) | ((h3 >> 7) & 0xf);
+		
+		h = h1 ^ h2 ^ h3 ^ ((seed >> 55) & 0x1ff);
+		h ^= ((seed >> 22) & 0x7ff) ^ (seed & 0x7ff);
+	} else {
+		h = ((seed >> 55) & 0x1ff) ^ ((seed >> 44) & 0x7ff)
+			^ ((seed >> 33) & 0x7ff) ^ ((seed >> 22) & 0x7ff)
+			^ ((seed >> 11) & 0x7ff) ^ (seed & 0x7ff);
+	}
+
+	return h;
+}
+
+static u64 rtl838x_hash_key(u64 mac, u32 vid)
+{
+	return rtl838x_hash(mac << 12 | vid);
+}
+
+static u64 read_l2_entry_using_hash(u32 hash, u32 position, u32 *r)
+{
+	u64 entry;
+	/* Search in SRAM, with hash and at position in hash bucket (0-3) */
+	u32 idx = (0 << 14) | (hash << 2) | position;
+
+	u32 cmd = 1 << 16 /* Execute cmd */
+		| 1 << 15 /* Read */
+		| 0 << 13 /* Table type 0b00 */
+		| (idx & 0x1fff);
+
+	sw_w32(cmd, RTL838X_TBL_ACCESS_L2_CTRL);
+	do { }  while (sw_r32(RTL838X_TBL_ACCESS_L2_CTRL) & (1 << 16));
+	r[0] = sw_r32(RTL838X_TBL_ACCESS_L2_DATA(0));
+	r[1] = sw_r32(RTL838X_TBL_ACCESS_L2_DATA(1));
+	r[2] = sw_r32(RTL838X_TBL_ACCESS_L2_DATA(2));
+
+	entry = (((u64) r[1]) << 32) | (r[2] & 0xfffff000)
+			| (r[0] & 0xfff);
+	return entry;
+}
+
+static u64 rtl838x_read_cam(int idx, u32 *r)
+{
+	u64 entry;
+	u32 cmd = 1 << 16 /* Execute cmd */
+		| 1 << 15 /* Read */
+		| 1 << 13 /* Table type 0b01 */
+		| (idx & 0x3f);
+	sw_w32(cmd, RTL838X_TBL_ACCESS_L2_CTRL);
+	do { }  while (sw_r32(RTL838X_TBL_ACCESS_L2_CTRL) & (1 << 16));
+	r[0] = sw_r32(RTL838X_TBL_ACCESS_L2_DATA(0));
+	r[1] = sw_r32(RTL838X_TBL_ACCESS_L2_DATA(1));
+	r[2] = sw_r32(RTL838X_TBL_ACCESS_L2_DATA(2));
+
+	entry = (((u64) r[1]) << 32) | (r[2] & 0xfffff000)
+			| (r[0] & 0xfff);
+	return entry;
+}
+
+static void rtl838x_write_cam(int idx, u32 *r)
+{
+	u32 cmd = 1 << 16 /* Execute cmd */
+		| 1 << 15 /* Read */
+		| 1 << 13 /* Table type 0b01 */
+		| (idx & 0x3f);
+		
+	sw_w32(r[0], RTL838X_TBL_ACCESS_L2_DATA(0));
+	sw_w32(r[1], RTL838X_TBL_ACCESS_L2_DATA(1));
+	sw_w32(r[2], RTL838X_TBL_ACCESS_L2_DATA(2));
+
+	sw_w32(cmd, RTL838X_TBL_ACCESS_L2_CTRL);
+	do { }  while (sw_r32(RTL838X_TBL_ACCESS_L2_CTRL) & (1 << 16));
+}
+
+static void rtl838x_write_hash(int idx, u32 *r)
+{
+	u32 cmd;
+	cmd = 1 << 16 /* Execute cmd */
+		| 0 << 15 /* Write */
+		| 0 << 13 /* Table type 0b00 */
+		| (idx & 0x1fff);
+
+	sw_w32(0, RTL838X_TBL_ACCESS_L2_DATA(0));
+	sw_w32(0, RTL838X_TBL_ACCESS_L2_DATA(1));
+	sw_w32(0, RTL838X_TBL_ACCESS_L2_DATA(2));
+	sw_w32(cmd, RTL838X_TBL_ACCESS_L2_CTRL);
+	do { }  while (sw_r32(RTL838X_TBL_ACCESS_L2_CTRL) & (1 << 16));
+}
+
+
+static int rtl838x_port_fdb_dump(struct dsa_switch *ds, int port,
+				 dsa_fdb_dump_cb_t *cb, void *data)
+{
+	u32 r[3];
+	u8 mac[6];
+	u16 vid;
+	struct rtl838x_switch_priv *priv = ds->priv;
+	int i;
+
+	mutex_lock(&priv->reg_mutex);
+	
+	for (i = 0; i < 8192; i++) {
+		read_l2_entry_using_hash(i >> 2, i & 0x3, r);
+		mac[0] = (r[1] >> 20);
+		mac[1] = (r[1] >> 12);
+		mac[2] = (r[1] >> 4);
+		mac[3] = (r[1] & 0xf) << 4 | (r[2] >> 28);
+		mac[4] = (r[2] >> 20);
+		mac[5] = (r[2] >> 12);
+		vid = r[0] & 0xfff;
+
+		if ( !(r[0] >> 17) ) /* Check for invalid entry */
+			continue;
+
+		if (port == ((r[0] >> 12) & 0x1f)) {
+			printk("-> mac %02x %02x %02x %02x %02x %02x, vid: %d\n",
+			       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], vid);
+			cb(mac, vid, (r[0] >> 19) & 1, data);
+		}
+	}
+
+	for (i = 0; i < 64; i++) {
+		rtl838x_read_cam(i, r);
+		mac[0] = (r[1] >> 20);
+		mac[1] = (r[1] >> 12);
+		mac[2] = (r[1] >> 4);
+		mac[3] = (r[1] & 0xf) << 4 | (r[2] >> 28);
+		mac[4] = (r[2] >> 20);
+		mac[5] = (r[2] >> 12);
+		vid = r[0] & 0xfff;
+
+		if ( !(r[0] >> 17) )
+			continue;
+
+		printk("Found in CAM: R1 %x R2 %x R3 %x\n", r[0], r[1], r[2]);
+		if (port == ((r[0] >> 12) & 0x1f))
+			cb(mac, vid, (r[0] >> 19) & 1, data);
+	}
+
+	mutex_unlock(&priv->reg_mutex);
+	return 0;
+}
+
+static int rtl838x_port_fdb_del(struct dsa_switch *ds, int port,
+			   const unsigned char *addr, u16 vid)
+{
+	struct rtl838x_switch_priv *priv = ds->priv;
+	u64 mac = ether_addr_to_u64(addr);
+	u32 key = rtl838x_hash_key(mac, vid);
+	int i;
+	u32 r[3];
+	u64 entry;
+	int idx = -1;
+	int err = 0;
+
+	printk("In rtl838x_port_fdb_del, mac %llx, vid: %d, key: %x\n", mac, vid, key);
+	mutex_lock(&priv->reg_mutex);
+	for (i = 0; i < 4; i++) {
+		entry = read_l2_entry_using_hash(key, i, r);
+		printk("Got del: R1 %x R2 %x R3 %x, %llx\n", r[0], r[1], r[2], entry);
+		if ( !(r[0] >> 17) ) /* Check for invalid entry */
+			continue;
+		printk("Found for del: R1 %x R2 %x R3 %x, %llx\n", r[0], r[1], r[2], entry);
+		if ( (entry & 0x0fffffffffffffff) == ((mac << 12) | vid) ) {
+			printk("Found entry\n");
+			idx = (key << 2) | i;
+			break;
+		}
+	}
+
+	if (idx >= 0) {
+		r[0] = r[1] = r[2] = 0;
+		rtl838x_write_hash(idx, r);
+		goto out;
+	}
+
+	/* Check CAM for spillover from hash buckets */
+	for (i = 0; i < 64; i++) {
+		entry = rtl838x_read_cam(i, r);
+		if ( (entry & 0x0fffffffffffffff) == ((mac << 12) | vid) ) {
+			printk("Found entry in CAM\n");
+			idx = i;
+			break;
+		}
+	}
+	if (idx >= 0) {
+		r[0] = r[1] = r[2] = 0;
+		rtl838x_write_cam(idx, r);
+		goto out;
+	}
+	err = -ENOENT;
+out:
+	mutex_unlock(&priv->reg_mutex);
+	return err;
+}
+
+static int rtl838x_port_fdb_add(struct dsa_switch *ds, int port,
+				const unsigned char *addr, u16 vid)
+{
+	struct rtl838x_switch_priv *priv = ds->priv;
+	u64 mac = ether_addr_to_u64(addr);
+	u32 key = rtl838x_hash_key(mac, vid);
+	int i;
+	u32 r[3];
+	int idx = -1;
+	u64 entry;
+	int err = 0;
+
+	mutex_lock(&priv->reg_mutex);
+	for (i = 0; i < 4; i++) {
+		entry = read_l2_entry_using_hash(key, i, r);
+		if ( !(r[0] >> 17) ) { /* Check for invalid entry */
+			idx = (key << 2) | i;
+			break;
+		} else {
+			if ( (entry & 0x0fffffffffffffff) == ((mac << 12) | vid) ) {
+				printk("Found entry\n");
+				idx = (key << 2) | i;
+				break;
+			}
+		}
+	}
+	if (idx >= 0) {
+		// Found for del: R1 60000 R2 901b0e9 R3 12b0e000, 901b0e912b0e000
+		r[0] = 3 << 17 | port << 12; // Aging and  port
+		r[0] |= vid;
+		r[1] = mac >> 16;
+		r[2] = (mac & 0xffff) << 12; /* rvid = 0 */
+		rtl838x_write_hash(idx, r);
+		goto out;
+	}
+
+	/* Hash bucket full, try CAM */
+	for (i = 0; i < 64; i++) {
+		entry = rtl838x_read_cam(i, r);
+		if ( !(r[0] >> 17) ) { /* Check for invalid entry */
+			if (idx < 0) /* First empty entry? */
+				idx = i;
+			break;
+		} else if ( (entry & 0x0fffffffffffffff) == ((mac << 12) | vid) ) {
+			printk("Found entry in CAM\n");
+			idx = i;
+			break;
+		}
+	}
+	if (idx >= 0) {
+		r[0] = 3 << 17 | port << 12; // Aging
+		r[0] |= vid;
+		r[1] = mac >> 16;
+		r[2] = (mac & 0xffff) << 12; /* rvid = 0 */
+		rtl838x_write_cam(idx, r);
+		goto out;
+	}
+	err = -ENOTSUPP;
+out:
+	mutex_unlock(&priv->reg_mutex);
+	return err;
 }
 
 static void rtl838x_port_stp_state_get(u32 msti, u32 *state)
@@ -548,7 +824,7 @@ static void rtl838x_port_stp_state_get(u32 msti, u32 *state)
 	do { }  while (sw_r32(RTL838X_TBL_ACCESS_CTRL_0) & (1 << 15));
 	state[0] = sw_r32(RTL838X_TBL_ACCESS_DATA_0(0));
 	state[1] = sw_r32(RTL838X_TBL_ACCESS_DATA_0(1));
-/*	printk("STP port state %x %x\n", state[0], state[1]);*/
+/*	printk("STP port state %x %x\n", state[0], state[1]); */
 }
 
 static void rtl838x_port_stp_state_set(struct dsa_switch *ds, int port,
@@ -558,7 +834,7 @@ static void rtl838x_port_stp_state_set(struct dsa_switch *ds, int port,
 	u32 port_state[2];
 	int index, bit;
 	struct rtl838x_switch_priv *priv = ds->priv;
-/*	printk("rtl838x_port_stp_state_set, port %d state %2x\n", port, state); */
+	printk("rtl838x_port_stp_state_set, port %d state %2x\n", port, state);
 	mutex_lock(&priv->reg_mutex);
 
 	index = port >= 16? 0: 1;
@@ -810,12 +1086,6 @@ static int rtl838x_vlan_del(struct dsa_switch *ds, int port,
 	return 0;
 }
 
-static int rtl838x_port_fdb_add(struct dsa_switch *ds, int port,
-				const unsigned char *addr, u16 vid)
-{
-	return -EOPNOTSUPP;
-}
-
 static void rtl838x_port_bridge_leave (struct dsa_switch *ds, int port,
 				      struct net_device *bridge)
 {
@@ -892,21 +1162,6 @@ static int rtl838x_port_bridge_join(struct dsa_switch *ds, int port,
 //	print_matrix();
 	return 0;
 }
-
-static int rtl838x_port_fdb_del(struct dsa_switch *ds, int port,
-			   const unsigned char *addr, u16 vid)
-{
-	
-	return 0;
-}
-
-static int rtl838x_port_fdb_dump(struct dsa_switch *ds, int port,
-				 dsa_fdb_dump_cb_t *cb, void *data)
-{
-	
-	return 0;
-}
-	
 
 static int rtl838x_port_enable(struct dsa_switch *ds, int port,
 				struct phy_device *phydev)
@@ -1280,6 +1535,7 @@ static const struct dsa_switch_ops rtl838x_switch_ops = {
 	.port_bridge_join	= rtl838x_port_bridge_join,
 	.port_bridge_leave	= rtl838x_port_bridge_leave,
 	.port_stp_state_set	= rtl838x_port_stp_state_set,
+	.set_ageing_time	= rtl838x_set_l2aging,
 	.port_fast_age		= rtl838x_fast_age,
 	.port_fdb_add		= rtl838x_port_fdb_add,
 	.port_fdb_del		= rtl838x_port_fdb_del,
