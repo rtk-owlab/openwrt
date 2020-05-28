@@ -530,7 +530,7 @@ static int rtl838x_set_l2aging(struct dsa_switch *ds, u32 t)
 		t = ((t * 625) / 1000 + 127) / 128;
 
 	sw_w32(t, RTL838X_L2_CTRL_1);
-	
+
 	return 0;
 }
 
@@ -551,13 +551,13 @@ static u32 rtl838x_hash(u64 seed)
 	if (sw_r32(RTL838X_L2_CTRL_0) & 1) {
 		h1 = (seed >> 11) & 0x7ff;
 		h1 = ((h1 & 0x1f) << 6) | ((h1 >> 5) & 0x3f);
-		
+
 		h2 = (seed >> 33) & 0x7ff;
 		h2 = ((h2 & 0x3f) << 5) | ((h2 >> 6) & 0x1f);
-		
+
 		h3 = (seed >> 44) & 0x7ff;
 		h3 = ((h3 & 0x7f) << 4) | ((h3 >> 7) & 0xf);
-		
+
 		h = h1 ^ h2 ^ h3 ^ ((seed >> 55) & 0x1ff);
 		h ^= ((seed >> 22) & 0x7ff) ^ (seed & 0x7ff);
 	} else {
@@ -620,7 +620,7 @@ static void rtl838x_write_cam(int idx, u32 *r)
 		| 1 << 15 /* Read */
 		| 1 << 13 /* Table type 0b01 */
 		| (idx & 0x3f);
-		
+
 	sw_w32(r[0], RTL838X_TBL_ACCESS_L2_DATA(0));
 	sw_w32(r[1], RTL838X_TBL_ACCESS_L2_DATA(1));
 	sw_w32(r[2], RTL838X_TBL_ACCESS_L2_DATA(2));
@@ -644,18 +644,17 @@ static void rtl838x_write_hash(int idx, u32 *r)
 	do { }  while (sw_r32(RTL838X_TBL_ACCESS_L2_CTRL) & (1 << 16));
 }
 
-
 static int rtl838x_port_fdb_dump(struct dsa_switch *ds, int port,
 				 dsa_fdb_dump_cb_t *cb, void *data)
 {
 	u32 r[3];
 	u8 mac[6];
-	u16 vid;
+	u16 vid, rvid;
 	struct rtl838x_switch_priv *priv = ds->priv;
 	int i;
 
 	mutex_lock(&priv->reg_mutex);
-	
+
 	for (i = 0; i < 8192; i++) {
 		read_l2_entry_using_hash(i >> 2, i & 0x3, r);
 		mac[0] = (r[1] >> 20);
@@ -665,13 +664,14 @@ static int rtl838x_port_fdb_dump(struct dsa_switch *ds, int port,
 		mac[4] = (r[2] >> 20);
 		mac[5] = (r[2] >> 12);
 		vid = r[0] & 0xfff;
+		rvid = r[2] & 0xfff;
 
 		if ( !(r[0] >> 17) ) /* Check for invalid entry */
 			continue;
 
 		if (port == ((r[0] >> 12) & 0x1f)) {
-			printk("-> mac %02x %02x %02x %02x %02x %02x, vid: %d\n",
-			       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], vid);
+			printk("-> mac %02x %02x %02x %02x %02x %02x, vid: %d, rvid: %d\n",
+			       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], vid, rvid);
 			cb(mac, vid, (r[0] >> 19) & 1, data);
 		}
 	}
@@ -870,6 +870,77 @@ static void rtl838x_port_stp_state_set(struct dsa_switch *ds, int port,
 	sw_w32(port_state[1], RTL838X_TBL_ACCESS_DATA_0(1));
 	sw_w32(cmd, RTL838X_TBL_ACCESS_CTRL_0);
 	do { }  while (sw_r32(RTL838X_TBL_ACCESS_CTRL_0) & (1 << 15));
+
+	mutex_unlock(&priv->reg_mutex);
+}
+
+static int rtl838x_port_mirror_add(struct dsa_switch *ds, int port,
+				   struct dsa_mall_mirror_tc_entry *mirror,
+				   bool ingress)
+{
+	/* We support 4 mirror groups, one destionation port per group */
+	int group;
+	struct rtl838x_switch_priv *priv = ds->priv;
+	printk("In rtl838x_port_mirror_add\n");
+
+	mutex_lock(&priv->reg_mutex);
+	for (group = 0; group < 4; group++) {
+		if (priv->mirror_group_ports[group] == mirror->to_local_port)
+			break;
+	}
+	if (group >= 4) {
+		for (group = 0; group < 4; group++) {
+			if (priv->mirror_group_ports[group] < 0)
+				break;
+		}
+	}
+
+	if (group >= 4) {
+		mutex_unlock(&priv->reg_mutex);
+		return -ENOTSUPP;
+	}
+
+	printk("Using group %d\n", group);
+	/* Enable mirroring to port across VLANs (bit 11) */
+	sw_w32(1 << 11| (mirror->to_local_port << 4) | 1,
+	       RTL838X_MIR_CTRL(group));
+
+	if (ingress)
+		sw_w32_mask(0, 1 << port, RTL838X_MIR_SPM_CTRL(group));
+	else
+		sw_w32_mask(0, 1 << port, RTL838X_MIR_DPM_CTRL(group));
+
+	priv->mirror_group_ports[group] = mirror->to_local_port;
+	mutex_unlock(&priv->reg_mutex);
+	return 0;
+}
+
+static void rtl838x_port_mirror_del(struct dsa_switch *ds, int port,
+				    struct dsa_mall_mirror_tc_entry *mirror)
+{
+	int group = 0;
+	struct rtl838x_switch_priv *priv = ds->priv;
+	printk("In rtl838x_port_mirror_del\n");
+	mutex_lock(&priv->reg_mutex);
+	for (group = 0; group < 4; group++) {
+		if (priv->mirror_group_ports[group] == mirror->to_local_port)
+			break;
+	}
+	if (group >= 4) {
+		mutex_unlock(&priv->reg_mutex);
+		return;
+	}
+
+	/* Egress, clear destination port matrix */
+	sw_w32_mask(1 << port, 0, RTL838X_MIR_DPM_CTRL(group));
+	/* Ingress, clear source port matrix */
+	sw_w32_mask(1 << port, 0, RTL838X_MIR_SPM_CTRL(group));
+
+	if (! (sw_r32(RTL838X_MIR_DPM_CTRL(group))
+	      || sw_r32(RTL838X_MIR_DPM_CTRL(group)))) {
+		priv->mirror_group_ports[group] = -1;
+		sw_w32(0, RTL838X_MIR_CTRL(group));
+	}
 
 	mutex_unlock(&priv->reg_mutex);
 }
@@ -1542,6 +1613,8 @@ static const struct dsa_switch_ops rtl838x_switch_ops = {
 	.port_fdb_dump		= rtl838x_port_fdb_dump,
 	.port_enable		= rtl838x_port_enable,
 	.port_disable		= rtl838x_port_disable,
+	.port_mirror_add	= rtl838x_port_mirror_add,
+	.port_mirror_del	= rtl838x_port_mirror_del,
 	.phy_read		= dsa_phy_read,
 	.phy_write		= dsa_phy_write,
 	.get_strings		= rtl838x_get_strings,
@@ -1559,7 +1632,7 @@ static const struct dsa_switch_ops rtl838x_switch_ops = {
 
 static int __init rtl838x_sw_probe(struct platform_device *pdev)
 {
-	int err = 0;
+	int err = 0, i;
 	struct rtl838x_switch_priv *priv;
 	struct device *dev = &pdev->dev;
 //	struct rtl838x_vlan_info info;
@@ -1612,7 +1685,13 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 		/* Need to free allocated switch here */
 	}
 
+	printk("RESETTING L2 settings\n");
+	sw_w32_mask(0, 1 << 8, RTL838X_RST_GLB_CTRL_0);
 	rtl838x_get_l2aging();
+
+	/* Clear all destination ports for mirror groups */
+	for (i=0; i< 4; i++)
+		priv->mirror_group_ports[i] = -1;
 
 	return err;
 }

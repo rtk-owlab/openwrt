@@ -70,12 +70,10 @@ int __init rtl838x_serial_init(void)
 	p.iotype = UPIO_MEM;
 	p.regshift = 2;
 	p.fifosize = 1;
-	p.custom_divisor = SYSTEM_FREQ / (baud * 16) - 1;
 
 	/* Call early_serial_setup() here, to set up 8250 console driver */
-	if (early_serial_setup(&p) != 0) {
+	if (early_serial_setup(&p) != 0)
 		ret = 1;
-	}
 #endif
 	return 0;
 }

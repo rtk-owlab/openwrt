@@ -980,7 +980,7 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	}
 	SET_NETDEV_DEV(dev, &pdev->dev);
 	priv = netdev_priv(dev);
-	
+
 	/* obtain buffer memory space */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (res) {
@@ -994,31 +994,36 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 
 		dev->mem_start = mem->start;
 		dev->mem_end   = mem->end;
-	}	
-	
+	} else {
+		dev_err(&pdev->dev, "cannot request IO resource\n");
+		err = -ENXIO;
+		goto err_free;
+	}
+
 	/* Allocate buffer memory */
 	priv->membase = dmam_alloc_coherent(&pdev->dev,
 				sizeof(struct ring_b), (void *)&dev->mem_start,
 				GFP_KERNEL);
 	if (!priv->membase) {
-		dev_err(&pdev->dev, "cannot allocate %dB buffer\n",
-		sizeof(struct ring_b));
+		dev_err(&pdev->dev, "cannot allocate DMA buffer\n");
 		err = -ENOMEM;
 		goto err_free;
 	}
 
 	spin_lock_init(&priv->lock);
-	
+
 	/* obtain device IRQ number */
-	/* res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
+	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "cannot obtain IRQ\n");
-		err = -ENXIO;
-		goto err_free;
+		printk("Using defualt: 32\n");
+		dev->irq = 32;
+/*		err = -ENXIO;
+ * 		goto err_free; 
+ **/ 
+	} else {
+		dev->irq = res->start;
 	}
-	dev->irq = res->start;
-	*/
-	dev->irq = 32;
 	dev->ethtool_ops = &rtl838x_ethtool_ops;
 
 	priv->id = sw_r32(RTL838X_MODEL_NAME_INFO) >> 16;
@@ -1033,7 +1038,7 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 		printk("Unknown chip id (%04x)\n", priv->id);
 		return -ENODEV;
 	}
-	
+
 	rtl8380_init_mac(priv);
 
 	/* try to get mac address in the following order:
@@ -1055,8 +1060,7 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	/* if the address is invalid, use a random value */
 	if (!is_valid_ether_addr(dev->dev_addr)) {
 		struct sockaddr sa = { AF_UNSPEC };
-		netdev_warn(dev,
-			    "Invalid MAC address, defaulting to random\n");
+		netdev_warn(dev, "Invalid MAC address, using random\n");
 		eth_hw_addr_random(dev);
 		memcpy(sa.sa_data, dev->dev_addr, ETH_ALEN);
 		if (rtl838x_set_mac_address(dev, &sa))
@@ -1067,7 +1071,7 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	dev->netdev_ops = &rtl838x_eth_netdev_ops;
 	priv->pdev = pdev;
 	priv->netdev = dev;
-	
+
 	err = rtl838x_mdio_init(priv);
 	if (err)
 		goto err_free;
@@ -1075,7 +1079,7 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	err = register_netdev(dev);
 	if (err)
 		goto err_free;
-	
+
 	netif_napi_add(dev, &priv->napi, rtl838x_poll_rx, 64);
 	platform_set_drvdata(pdev, dev);
 	

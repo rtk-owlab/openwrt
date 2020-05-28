@@ -34,20 +34,20 @@ struct clk {
 
 struct clk cpu_clk;
 
+u32 pll_reset_value;
+
 static void rtl838x_restart(char *command)
 {
 	u32 pll = rtl838x_r32(RTL838X_PLL_CML_CTRL);
-	pr_info("PLL control register: %x\n", pll);
-	
-	if (pll == 0xefffffff) { // Fix reset for D-Link
-		rtl838x_w32(3, RTL838X_INT_RW_CTRL);
-		// For D-Link
-		rtl838x_w32_mask(0xC0000000, 0xCFFFFFFF, RTL838X_PLL_CML_CTRL);
-		rtl838x_w32(0, RTL838X_INT_RW_CTRL);
-	}
-	pll = rtl838x_r32(RTL838X_PLL_CML_CTRL);
-	pr_info("PLL at restart: %x\n", pll);
+
+	pr_info("PLL control register: %x, applying reset value %x\n",
+		pll, pll_reset_value);
+	rtl838x_w32(3, RTL838X_INT_RW_CTRL);
+	rtl838x_w32(pll_reset_value, RTL838X_PLL_CML_CTRL);
+	rtl838x_w32(0, RTL838X_INT_RW_CTRL);
+
 	printk("System restart.\n");
+
 	/* Reset Global Control1 Register */
 	rtl838x_w32(1, (volatile void *)0xBB000040);
 }
@@ -79,7 +79,7 @@ void __init plat_mem_setup(void)
 	pr_info("plat_mem_setup called \n");
 
 	set_io_port_base(KSEG1);
-	
+
 	if (fw_passed_dtb) /* UHI interface */
 		dtb = (void *)fw_passed_dtb;
 	else if (__dtb_start != __dtb_end)
@@ -92,7 +92,7 @@ void __init plat_mem_setup(void)
 	 * parsed resulting in our memory appearing
 	 */
 	__dt_setup_arch(dtb);
-	
+
 	rtl838x_setup();
 }
 
@@ -108,6 +108,7 @@ EXPORT_SYMBOL_GPL(clk_enable);
 
 void clk_disable(struct clk *clk)
 {
+
 }
 EXPORT_SYMBOL_GPL(clk_disable);
 
@@ -156,7 +157,9 @@ void __init plat_time_init(void)
 
 	pr_info("CPU Clock: %ld MHz\n", clk->rate /1000000);
 	mips_hpt_frequency = freq / 2;
-	pr_info("PLL control register: %x\n", rtl838x_r32(RTL838X_PLL_CML_CTRL));
+
+	pll_reset_value = rtl838x_r32(RTL838X_PLL_CML_CTRL);
+	pr_info("PLL control register: %x\n", pll_reset_value);
 	
 	/* With the info from the command line and cpu-freq we can setup the console */
 	rtl838x_serial_init();

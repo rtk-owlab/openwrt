@@ -92,6 +92,10 @@
 #define RTL838X_TBL_ACCESS_L2_CTRL		(RTL838X_SW_BASE + 0x6900)
 #define RTL838X_TBL_ACCESS_L2_DATA(idx)		(RTL838X_SW_BASE + 0x6908 + ((idx) << 2))
 
+/* Port Mirroring */
+#define RTL838X_MIR_CTRL(grp)			(RTL838X_SW_BASE + 0x5D00 + (((grp) << 2)))
+#define RTL838X_MIR_DPM_CTRL(grp)		(RTL838X_SW_BASE + 0x5D20 + (((grp) << 2)))
+#define RTL838X_MIR_SPM_CTRL(grp)		(RTL838X_SW_BASE + 0x5D10 + (((grp) << 2)))
 enum phy_type {
 	PHY_NONE = 0,
 	PHY_RTL838X_SDS = 1,
@@ -117,6 +121,7 @@ struct rtl838x_switch_priv {
 	struct rtl838x_port ports[32]; /* TODO: correct size! */
 	struct mutex reg_mutex;
 	int link_state_irq;
+	int mirror_group_ports[4];
 	struct mii_bus *mii_bus;
 };
 

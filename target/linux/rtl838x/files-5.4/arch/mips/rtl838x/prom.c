@@ -49,10 +49,8 @@ void prom_putchar(char c)
 {
 	unsigned int retry = 0;
 
-	do
-	{
-		if (retry++ >= 30000)
-		{
+	do {
+		if (retry++ >= 30000) {
 			/* Reset Tx FIFO */
 			rtl838x_w8(TXRST | CHAR_TRIGGER_14, UART0_FCR);
 			return;
