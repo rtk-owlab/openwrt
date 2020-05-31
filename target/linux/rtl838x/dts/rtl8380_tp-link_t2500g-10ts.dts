@@ -24,10 +24,99 @@
 		compatible = "gpio-leds";
 
 		led_sys: sys {
-			label = "dgs-1210-16:green:sys";
-			gpios = <&gpio0 47 GPIO_ACTIVE_HIGH>;
+			label = "t2500g-10ts:green:sys";
+			gpios = <&gpio0 148 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan1ge: lan1ge {
+			label = "t2500g-10ts:green:lan1ge";
+			gpios = <&gpio0 118 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan2ge: lan2ge {
+			label = "t2500g-10ts:green:lan2ge";
+			gpios = <&gpio0 119 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan3ge: lan3ge {
+			label = "t2500g-10ts:green:lan3ge";
+			gpios = <&gpio0 120 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan4ge: lan4ge {
+			label = "t2500g-10ts:green:lan4ge";
+			gpios = <&gpio0 121 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan5ge: lan5ge {
+			label = "t2500g-10ts:green:lan5ge";
+			gpios = <&gpio0 122 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan6ge: lan6ge {
+			label = "t2500g-10ts:green:lan6ge";
+			gpios = <&gpio0 123 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan7ge: lan7ge {
+			label = "t2500g-10ts:green:lan7ge";
+			gpios = <&gpio0 124 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan8ge: lan8ge {
+			label = "t2500g-10ts:green:lan8ge";
+			gpios = <&gpio0 125 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan9ge: lan9ge {
+			label = "t2500g-10ts:green:lan9ge";
+			gpios = <&gpio0 126 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan10ge: lan10ge {
+			label = "t2500g-10ts:green:lan10ge";
+			gpios = <&gpio0 127 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan1fe: lan1fe {
+			label = "t2500g-10ts:amber:lan1fe";
+			gpios = <&gpio0 150 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan2fe: lan2fe {
+			label = "t2500g-10ts:amber:lan2fe";
+			gpios = <&gpio0 151 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan3fe: lan3fe {
+			label = "t2500g-10ts:amber:lan3fe";
+			gpios = <&gpio0 152 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan4fe: lan4fe {
+			label = "t2500g-10ts:amber:lan4fe";
+			gpios = <&gpio0 153 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan5fe: lan5fe {
+			label = "t2500g-10ts:amber:lan5fe";
+			gpios = <&gpio0 154 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan6fe: lan6fe {
+			label = "t2500g-10ts:amber:lan6fe";
+			gpios = <&gpio0 155 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan7fe: lan7fe {
+			label = "t2500g-10ts:amber:lan7fe";
+			gpios = <&gpio0 156 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan8fe: lan8fe {
+			label = "t2500g-10ts:amber:lan8fe";
+			gpios = <&gpio0 157 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan9fe: lan9fe {
+			label = "t2500g-10ts:amber:lan9fe";
+			gpios = <&gpio0 158 GPIO_ACTIVE_HIGH>;
+		};
+		led_lan10fe: lan10fe {
+			label = "t2500g-10ts:amber:lan10fe";
+			gpios = <&gpio0 159 GPIO_ACTIVE_HIGH>;
 		};
 	};
+};
+
+
+&gpio0 {
+	take-port-leds;
+	leds-per-port = <2>;
+	led-mode = <0xf501ea>;
+	num-leds = <32>;
+	min-led = <0>;
 };
 
 &spi0 {
@@ -144,48 +233,56 @@
 			label = "lan1";
 			phy-handle = <&phy8>;
 			phy-mode = "qsgmii";
+			led-id = <17>;
 		};
 		port@1 {
 			reg = <9>;
 			label = "lan2";
 			phy-handle = <&phy9>;
 			phy-mode = "qsgmii";
+			led-id = <18>;
 		};
 		port@2 {
 			reg = <10>;
 			label = "lan3";
 			phy-handle = <&phy10>;
 			phy-mode = "qsgmii";
+			led-id = <19>;
 		};
 		port@3 {
 			reg = <11>;
 			label = "lan4";
 			phy-handle = <&phy11>;
 			phy-mode = "qsgmii";
+			led-id = <20>;
 		};
 		port@4 {
 			reg = <12>;
 			label = "lan5";
 			phy-handle = <&phy12>;
 			phy-mode = "qsgmii";
+			led-id = <21>;
 		};
 		port@5 {
 			reg = <13>;
 			label = "lan6";
 			phy-handle = <&phy13>;
 			phy-mode = "qsgmii";
+			led-id = <22>;
 		};
 		port@6 {
 			reg = <14>;
 			label = "lan7";
 			phy-handle = <&phy14>;
 			phy-mode = "qsgmii";
+			led-id = <23>;
 		};
 		port@7 {
 			reg = <15>;
 			label = "lan8";
 			phy-handle = <&phy15>;
 			phy-mode = "qsgmii";
+			led-id = <24>;
 		};
 	
 		port@24 {
@@ -193,12 +290,14 @@
 			label = "lan9";
 			phy-mode = "qsgmii";
 			phy-handle = <&phy24>;
+			led-id = <25>;
 		};
 		port@26 {
 			reg = <26>;
 			label = "lan10";
 			phy-mode = "qsgmii";
 			phy-handle = <&phy26>;
+			led-id = <26>;
 		};
 		port@28 {
 			ethernet = <&ethernet0>;

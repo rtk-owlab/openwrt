@@ -69,6 +69,7 @@ rtl838x_setup_macs()
 
 	case $board in
 	d-link,dgs-1210-16|\
+	tp-link,t2500g-10ts|\
 	zyxel,gs1900)
 		lan_mac=$(mtd_get_mac_ascii u-boot-env ethaddr)
 		label_mac=$lan_mac
