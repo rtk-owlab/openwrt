@@ -80,7 +80,6 @@
 		#gpio-cells = <2>;
 		interrupt-parent = <&cpuintc>;
 		interrupts = <31>;
-		indirect-access-bus-id = <0>;
 	};
 
 	ethernet0: ethernet@bb00a300 {

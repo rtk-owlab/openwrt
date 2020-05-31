@@ -30,6 +30,10 @@
 	};
 };
 
+&gpio0 {
+	indirect-access-bus-id = <0>;
+};
+
 &spi0 {
 	status = "okay";
 	flash@0 {
