@@ -1028,8 +1028,11 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 
 	priv->id = sw_r32(RTL838X_MODEL_NAME_INFO) >> 16;
 	switch (priv->id) {
+	case 0x8332:
+		printk("Found RTL8332M\n");
+		break;
 	case 0x8380:
-	printk("Found RTL8380M\n");
+		printk("Found RTL8380M\n");
 		break;
 	case 0x8382:
 		printk("Found RTL8382M\n");

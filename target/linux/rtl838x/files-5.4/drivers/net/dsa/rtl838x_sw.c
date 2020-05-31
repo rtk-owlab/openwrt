@@ -299,8 +299,11 @@ static void rtl8380_get_version(struct rtl838x_switch_priv *priv)
 	priv->id = sw_r32(RTL838X_MODEL_NAME_INFO) >> 16;
 	
 	switch (priv->id) {
+	case 0x8332:
+		printk("Found RTL8332M\n");
+		break;
 	case 0x8380:
-	printk("Found RTL8380M\n");
+		printk("Found RTL8380M\n");
 		break;
 	case 0x8382:
 		printk("Found RTL8382M\n");
@@ -388,8 +391,7 @@ static int rtl838x_mdio_write(struct mii_bus *bus, int addr, int regnum,
 	return dsa_phy_write(priv->ds, addr, regnum, val);
 }
 
-
-static int rtl8380_enable_phy_polling(struct rtl838x_switch_priv *priv)
+static void rtl8380_enable_phy_polling(struct rtl838x_switch_priv *priv)
 {
 	int i;
 	u32 v = 0;
@@ -404,7 +406,6 @@ static int rtl8380_enable_phy_polling(struct rtl838x_switch_priv *priv)
 	sw_w32(v, RTL838X_SMI_POLL_CTRL);
 	/* PHY update complete */
 	sw_w32_mask(0, 0x8000, RTL838X_SMI_GLB_CTRL);
-	return 0;
 }
 
 void print_matrix(void)
@@ -454,7 +455,6 @@ static int rtl838x_setup(struct dsa_switch *ds)
 	rtl8380_enable_phy_polling(priv);
 	printk("Please wait until PHY is settled\n");
 	msleep(1000);
-
 	return 0;
 }
 
