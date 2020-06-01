@@ -447,8 +447,6 @@ static int rtl838x_gpio_probe(struct platform_device *pdev)
 	struct rtl838x_gpios *gpios;
 	int err;
 	u8 indirect_bus_id;
-	u32 leds_per_port;
-	u32 led_mode;
 	
 	printk("Probing RTL838X GPIOs\n");
 	if (!np) {

@@ -937,6 +937,7 @@ static int rtl8380_configure_serdes(void)
 	u32 sds_conf_value;
 	int i;
 
+	pr_info("Enabling RTL8380 SerDes\n");
 	/* Back up serdes power down value */
 	sds_conf_value = sw_r32(RTL838X_SDS_CFG_REG);
 	pr_debug("SDS power down value: %x\n", sds_conf_value);
@@ -1059,7 +1060,7 @@ static int rtl8218b_ext_phy_probe(struct phy_device *phydev)
 
 	/* All base addresses of the PHYs start at multiples of 8 */
 	if(!(addr % 8)) {
-		/* Configuration must be done whil patching still possible */
+		/* Configuration must be done while patching still possible */
 		return rtl8380_configure_ext_rtl8218b(phydev);
 	}
 	return 0;
@@ -1071,15 +1072,14 @@ static int rtl8218b_int_phy_probe(struct phy_device *phydev)
 	struct rtl838x_phy_priv *priv;
 	int addr = phydev->mdio.addr;
 
+	if (addr >= 24)
+		return -ENODEV;
+	
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
 	priv->name = "RTL8218B (internal)";
-
-	/* On the RTL8380M, PHYs 24-27 connect to the internal SerDes */
-	if (addr == 24 && (sw_r32(RTL838X_MODEL_NAME_INFO) >> 16) == 0x8380)
-		return rtl8380_configure_serdes();
 
 	/* All base addresses of the PHYs start at multiples of 8 */
 	if(!(addr % 8)) {
@@ -1087,6 +1087,30 @@ static int rtl8218b_int_phy_probe(struct phy_device *phydev)
 		return rtl8380_configure_int_rtl8218b(phydev);
 	}
 	return 0;
+}
+
+static int rtl838x_serdes_probe(struct phy_device *phydev)
+{
+	struct device *dev = &phydev->mdio.dev;
+	struct rtl838x_phy_priv *priv;
+	int addr = phydev->mdio.addr;
+
+	if (addr < 24)
+		return -ENODEV;
+
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+
+	priv->name = "RTL8380 Serdes";
+
+	/* On the RTL8380M, PHYs 24-27 connect to the internal SerDes */
+	if ((sw_r32(RTL838X_MODEL_NAME_INFO) >> 16) == 0x8380) {
+		if (addr == 24)
+			return rtl8380_configure_serdes();
+		return 0;
+	}
+	return -ENODEV;
 }
 
 static struct phy_driver rtl838x_phy_driver[] = {
@@ -1132,6 +1156,17 @@ static struct phy_driver rtl838x_phy_driver[] = {
 		.write_mmd	= rtl8380_rtl8218b_write_mmd,
 		.set_eee  	= rtl8380_rtl8218b_set_eee,
 		.get_eee  	= rtl8380_rtl8218b_get_eee_u_boot,
+	},
+	{
+		PHY_ID_MATCH_MODEL(PHY_ID_RTL8218B_I),
+		.name		= "REATLTEK RTL8380 SERDES",
+		.features       = PHY_GBIT_FIBRE_FEATURES,
+		.probe		= rtl838x_serdes_probe,
+		.suspend	= genphy_suspend,
+		.resume		= genphy_resume,
+		.set_loopback   = genphy_loopback,
+		.read_mmd	= rtl8380_rtl8218b_read_mmd,
+		.write_mmd	= rtl8380_rtl8218b_write_mmd,
 	}
 };
 

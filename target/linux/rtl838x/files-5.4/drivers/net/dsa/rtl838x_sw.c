@@ -1456,6 +1456,11 @@ static void rtl838x_phylink_validate(struct dsa_switch *ds, int port,
 		phylink_set(mask, 1000baseT_Half);
 	}
 
+	/* On both the 8380 and 8382, ports 24-27 are SFP ports */
+	if (port >=24 && port <= 27) {
+		phylink_set(mask, 1000baseX_Full);
+	}
+
 	phylink_set(mask, 10baseT_Half);
 	phylink_set(mask, 10baseT_Full);
 	phylink_set(mask, 100baseT_Half);
@@ -1556,23 +1561,28 @@ static int rtl838x_mdio_probe(struct rtl838x_switch_priv *priv)
 	for_each_node_by_name(dn, "ethernet-phy") {
 		if(of_property_read_u32(dn, "reg", &pn))
 			continue;
-//		printk("index %d", pn);
+		printk("index %d, id: %x", pn, priv->id);
 		// Check for the integrated SerDes of the RTL8380M first
 		if (of_property_read_bool(dn, "phy-is-integrated")
 			&& priv->id == 0x8380 && pn >= 24) {
+			printk("----> FÓUND A SERDES\n");
 			priv->ports[pn].phy = PHY_RTL838X_SDS;
+			continue;
 		}
 		if (of_property_read_bool(dn, "phy-is-integrated")
 			&& !of_property_read_bool(dn, "sfp")) {
 			priv->ports[pn].phy = PHY_RTL8218B_INT;
+			continue;
 		}
 		if (!of_property_read_bool(dn, "phy-is-integrated")
 			&& of_property_read_bool(dn, "sfp")) {
 			priv->ports[pn].phy = PHY_RTL8214FC;
+			continue;
 		}
 		if (!of_property_read_bool(dn, "phy-is-integrated")
 			&& !of_property_read_bool(dn, "sfp")) {
 			priv->ports[pn].phy = PHY_RTL8218B_EXT;
+			continue;
 		}
 	}
 
