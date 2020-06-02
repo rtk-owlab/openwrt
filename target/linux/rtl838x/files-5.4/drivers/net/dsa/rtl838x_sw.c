@@ -536,9 +536,25 @@ static int rtl838x_set_l2aging(struct dsa_switch *ds, u32 t)
 
 static void rtl838x_fast_age(struct dsa_switch *ds, int port)
 {
+	struct rtl838x_switch_priv *priv = ds->priv;
+
 	printk("FAST AGE port %d\n", port);
-	sw_w32_mask(0, 1 << port, RTL838X_L2_PORT_AGING_OUT);
-	sw_w32_mask(0, 1 << 23, RTL838X_L2_CTRL_1);
+	mutex_lock(&priv->reg_mutex);
+	/* RTL838X_L2_TBL_FLUSH_CTRL register bits:
+	 * 0-4: Replacing port
+	 * 5-9: Flushed/replaced port
+	 * 10-21: FVID
+	 * 22: Entry types: 1: dynamic, 0: also static
+	 * 23: Match flush port
+	 * 24: Match FVID
+	 * 25: Flush (0) or replace (1) L2 entries
+	 * 26: Status of action (1: Start, 0: Done)
+	 */
+	sw_w32(1 << 26 | 1 << 23 | port << 5, RTL838X_L2_TBL_FLUSH_CTRL);
+
+	do { } while (sw_r32(RTL838X_L2_TBL_FLUSH_CTRL) & (1 << 26));
+
+	mutex_unlock(&priv->reg_mutex);
 }
 
 /*
@@ -824,7 +840,7 @@ static void rtl838x_port_stp_state_get(u32 msti, u32 *state)
 	do { }  while (sw_r32(RTL838X_TBL_ACCESS_CTRL_0) & (1 << 15));
 	state[0] = sw_r32(RTL838X_TBL_ACCESS_DATA_0(0));
 	state[1] = sw_r32(RTL838X_TBL_ACCESS_DATA_0(1));
-/*	printk("STP port state %x %x\n", state[0], state[1]); */
+	printk("STP port state %x %x\n", state[0], state[1]);
 }
 
 static void rtl838x_port_stp_state_set(struct dsa_switch *ds, int port,
@@ -842,21 +858,21 @@ static void rtl838x_port_stp_state_set(struct dsa_switch *ds, int port,
 
 	rtl838x_port_stp_state_get(msti, &port_state[0]);
 
+	printk("Current state, port %d: %d\n", port, (port_state[index] >> bit) & 3));
 	port_state[index] &= ~(3 << bit);
 
 	switch (state) {
-	case BR_STATE_DISABLED:
+	case BR_STATE_DISABLED: /* 0 */
 		port_state[index] |= (0 << bit);
 		break;
-	case BR_STATE_BLOCKING:
+	case BR_STATE_BLOCKING:  /* 4 */
+	case BR_STATE_LISTENING: /* 1 */
 		port_state[index] |= (1 << bit);
 		break;
-	case BR_STATE_LISTENING:
-		break;
-	case BR_STATE_LEARNING:
+	case BR_STATE_LEARNING: /* 2 */
 		port_state[index] |= (2 << bit);
 		break;
-	case BR_STATE_FORWARDING:
+	case BR_STATE_FORWARDING: /* 3*/
 		port_state[index] |= (3 << bit);
 	default:
 		break;
@@ -1561,7 +1577,7 @@ static int rtl838x_mdio_probe(struct rtl838x_switch_priv *priv)
 	for_each_node_by_name(dn, "ethernet-phy") {
 		if(of_property_read_u32(dn, "reg", &pn))
 			continue;
-		printk("index %d, id: %x", pn, priv->id);
+		// printk("index %d, id: %x", pn, priv->id);
 		// Check for the integrated SerDes of the RTL8380M first
 		if (of_property_read_bool(dn, "phy-is-integrated")
 			&& priv->id == 0x8380 && pn >= 24) {
