@@ -30,7 +30,7 @@
 		#address-cells = <0>;
 		#interrupt-cells = <1>;
 		interrupt-controller;
-		compatible = "mti,cpu-interrupt-controller";
+		compatible = "rtl838x,icu";
 	};
 
 	spi0: spi@b8001200 {
@@ -63,6 +63,8 @@
 		reg = <0xb8002100 0x100>;
 
 		clock-frequency = <200000000>;
+
+		interrupt-parent = <&cpuintc>;
 		interrupts = <38>;
 
 		reg-io-width = <1>;
@@ -86,6 +88,7 @@
 		status = "okay";
 		compatible = "realtek,rtl838x-eth";
 		reg = <0xbb00a300 0x100>;
+		interrupt-parent = <&cpuintc>;
 		interrupts = <32>;
 		#interrupt-cells = <1>;
 		phy-mode = "internal";

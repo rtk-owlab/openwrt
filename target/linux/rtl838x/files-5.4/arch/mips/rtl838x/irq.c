@@ -230,15 +230,41 @@ static void __init rtl838x_ictl_irq_init(unsigned int irq_base)
 	rtl838x_w32(IRR2_SETTING, IRR2);
 	rtl838x_w32(IRR3_SETTING, IRR3);
 }
- 
-void __init arch_init_irq(void)
+
+
+static int intc_map(struct irq_domain *d, unsigned int irq, irq_hw_number_t hw)
 {
-	/* do board-specific irq initialization */
-	pr_debug("In arch_init_irq, c0 register %x\n", read_c0_status());
+	irq_set_chip_and_handler(hw, &rtl838x_ictl_irq, handle_level_irq);
+
+	return 0;
+}
+
+static const struct irq_domain_ops irq_domain_ops = {
+	.xlate = irq_domain_xlate_onecell,
+	.map = intc_map,
+};
+
+int __init icu_of_init(struct device_node *node, struct device_node *parent)
+{
+	int i;
+	struct irq_domain *domain;
 
 	mips_cpu_irq_init();
 
-	rtl838x_ictl_irq_init(RTL838X_IRQ_ICTL_BASE);
+	domain = irq_domain_add_simple(node, 40, 0, &irq_domain_ops, NULL);
 
-	pr_debug("Done setting up IRQ, c0: %x\n", read_c0_status());
+	/* Setup all external HW irqs */
+	for (i = 8; i < 40; i++)
+		irq_domain_associate(domain, i, i);
+
+	rtl838x_ictl_irq_init(RTL838X_IRQ_ICTL_BASE);
+	return 0;
 }
+
+void __init arch_init_irq(void)
+{
+	/* do board-specific irq initialization */
+	irqchip_init();
+}
+
+IRQCHIP_DECLARE(mips_cpu_intc, "rtl838x,icu", icu_of_init);

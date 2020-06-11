@@ -858,7 +858,7 @@ static void rtl838x_port_stp_state_set(struct dsa_switch *ds, int port,
 
 	rtl838x_port_stp_state_get(msti, &port_state[0]);
 
-	printk("Current state, port %d: %d\n", port, (port_state[index] >> bit) & 3));
+	printk("Current state, port %d: %d\n", port, (port_state[index] >> bit) & 3);
 	port_state[index] &= ~(3 << bit);
 
 	switch (state) {
