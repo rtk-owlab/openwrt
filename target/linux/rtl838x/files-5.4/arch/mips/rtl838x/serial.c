@@ -32,6 +32,9 @@ int __init rtl838x_serial_init(void)
 	char parity = '\0', bits = '\0', flow = '\0';
 	char *s, *n;
 
+	/* Enable UART1 */
+	rtl838x_w32(0x10, RTL8380_GMII_INTF_SEL);
+
 	s = strstr(arcs_cmdline, "console=ttyS0,");
 	if (s) {
 		s += 14;
