@@ -35,7 +35,7 @@ u32 rtl838x_rtl8231_read(u8 bus_id, u32 reg)
 	bus_id &= 0x1f;
 	/* Calculate read register address */
 	t = (bus_id << 2) | (reg << 7);
-	
+
 	/* Set execution bit: cleared when operation completed */
 	t |= 1;
 	rtl838x_w32(t, RTL838X_EXT_GPIO_INDRT_ACCESS);
@@ -52,7 +52,7 @@ int rtl838x_rtl8231_write(u8 bus_id, u32 reg, u32 data)
 	data &= 0xffff;
 	reg &= 0x1f;
 	bus_id &= 0x1f;
-	
+
 	pr_debug("rtl838x_rtl8231_write: %x, %x, %x\n", bus_id, reg, data);
 	t = (bus_id << 2) | (reg << 7) | (data << 16);
 	/* Set write bit */
@@ -64,7 +64,7 @@ int rtl838x_rtl8231_write(u8 bus_id, u32 reg, u32 data)
 	do {	/* TODO: Return -1 if timeout */
 		t = rtl838x_r32(RTL838X_EXT_GPIO_INDRT_ACCESS);
 	} while (t & 1);
-	
+
 	return 0;
 }
 
@@ -73,14 +73,14 @@ static int rtl8231_pin_dir(u8 bus_id, u32 gpio, u32 dir)
 	/* dir 1: input
 	 * dir 0: output
 	 */
-	
+
 	 u32  v;
-	 
+
 	 if( gpio > 31 ) {
 		 return -1;
 		 pr_err("rtl8231_pin_dir: GPIO >= 32 not implemented!");
 	 }
-	 
+
 	/* Select GPIO function for pin */
 	v = rtl838x_rtl8231_read(bus_id, RTL8231_GPIO_PIN_SEL(gpio));
 	if (v & 0x80000000) {
@@ -89,7 +89,6 @@ static int rtl8231_pin_dir(u8 bus_id, u32 gpio, u32 dir)
 	}
 	rtl838x_rtl8231_write(bus_id, RTL8231_GPIO_PIN_SEL(gpio), v | (1 << (gpio % 16)));
 
-	
 	v = rtl838x_rtl8231_read(bus_id, RTL8231_GPIO_DIR(gpio));
 	if (v & 0x80000000) {
 		pr_err("Error reading RTL8231\n");
@@ -105,14 +104,14 @@ static int rtl8231_pin_dir_get(u8 bus_id, u32 gpio, u32 *dir)
 	/* dir 1: input
 	 * dir 0: output
 	 */
-	
+
 	 u32  v;
 	 
 	 if( gpio > 31 ) {
 		 return -1;
 		 pr_err("rtl8231_pin_dir_get: GPIO >= 32 not implemented!");
 	 }
-	 
+
 	v = rtl838x_rtl8231_read(bus_id, RTL8231_GPIO_DIR(gpio));
 	if (v & (1 << (gpio %16)))
 		*dir = 1;
@@ -140,7 +139,7 @@ static int rtl8231_pin_get(u8 bus_id, u32 gpio, u16 *state)
 		pr_err("Error reading RTL8231\n");
 		return -1;
 	}
-	
+
 	*state = v & 0xffff;
 	return 0;
 }
@@ -152,8 +151,10 @@ static int rtl838x_direction_input(struct gpio_chip *gc, unsigned offset)
 
 	pr_debug("rtl838x_direction_input: %d\n", offset);
 
-	if (offset < 32)
+	if (offset < 32) {
 		rtl838x_w32_mask(1 << offset, 0, RTL838X_GPIO_PABC_DIR);
+		return 0;
+	}
 
 	/* Internal LED driver does not support input */
 	if (offset >=32 && offset <64) 
@@ -329,7 +330,7 @@ int rtl8231_init(struct rtl838x_gpios *gpios)
 	u8 bus_id = gpios->bus_id;
 
 	printk("rtl8231_init\n");
-	
+
 	/* Enable RTL8231 indirect access mode */
 	rtl838x_w32_mask(0, 1, RTL838X_EXTRA_GPIO_CTRL);
 	rtl838x_w32_mask(3, 1, RTL838X_DMY_REG5);
@@ -338,7 +339,7 @@ int rtl8231_init(struct rtl838x_gpios *gpios)
 	rtl838x_w32_mask(0, 1 << RTL838X_GPIO_A1, RTL838X_GPIO_PABC_DIR);
 	rtl838x_w32_mask(0, 1 << RTL838X_GPIO_A1, RTL838X_GPIO_PABC_DATA);
 	mdelay(50); /* wait 50ms for reset */
-	
+
 	/*Select GPIO functionality for pins 0-15 and 16-32*/
 	rtl838x_rtl8231_write(bus_id, RTL8231_GPIO_PIN_SEL(0), 0xffff);
 	rtl838x_rtl8231_write(bus_id, RTL8231_GPIO_PIN_SEL(16), 0xffff);
@@ -447,7 +448,7 @@ static int rtl838x_gpio_probe(struct platform_device *pdev)
 	struct rtl838x_gpios *gpios;
 	int err;
 	u8 indirect_bus_id;
-	
+
 	printk("Probing RTL838X GPIOs\n");
 	if (!np) {
 		dev_err(&pdev->dev, "No DT found\n");
@@ -497,7 +498,7 @@ static int rtl838x_gpio_probe(struct platform_device *pdev)
 	gpios->gc.set = rtl838x_gpio_set;
 	gpios->gc.get = rtl838x_gpio_get;
 	gpios->gc.get_direction = rtl838x_get_direction;
-	
+
 	if(!of_property_read_u8(np, "indirect-access-bus-id", &indirect_bus_id)) {
 		gpios->bus_id = indirect_bus_id;
 		rtl8231_init(gpios);
