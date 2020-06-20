@@ -1703,7 +1703,7 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 	sw_w32(0xffffffff, RTL838X_IMR_PORT_LINK_STS_CHG);
 	/* Enable interrupts for switch */
 	sw_w32(0x1, RTL838X_IMR_GLB);
-	priv->link_state_irq = 28;
+	priv->link_state_irq = 20;
 	err = request_irq(priv->link_state_irq, rtl838x_switch_irq,
 			  IRQF_SHARED, "rtl8838x-link-state", priv->ds);
 	if (err) {

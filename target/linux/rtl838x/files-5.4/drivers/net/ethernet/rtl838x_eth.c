@@ -1015,8 +1015,8 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	/* obtain device IRQ number */
 	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!res) {
-		dev_err(&pdev->dev, "cannot obtain IRQ, using default 32\n");
-		dev->irq = 32;
+		dev_err(&pdev->dev, "cannot obtain IRQ, using default 24\n");
+		dev->irq = 24;
 	} else {
 		dev->irq = res->start;
 	}

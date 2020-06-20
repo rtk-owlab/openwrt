@@ -33,7 +33,7 @@ int __init rtl838x_serial_init(void)
 	char *s, *n;
 
 	/* Enable UART1 */
-	rtl838x_w32(0x10, RTL8380_GMII_INTF_SEL);
+	rtl838x_w32(0x10, RTL838X_GMII_INTF_SEL);
 
 	s = strstr(arcs_cmdline, "console=ttyS0,");
 	if (s) {
@@ -67,7 +67,7 @@ int __init rtl838x_serial_init(void)
 
 	p.type = PORT_16550A;
 	p.membase = (unsigned char *) RTL838X_UART0_BASE;
-	p.irq = RTL838X_UART0_EXT_IRQ;
+	p.irq = RTL838X_UART0_IRQ;
 	p.uartclk = SYSTEM_FREQ - (24 * baud);
 	p.flags = UPF_SKIP_TEST | UPF_LOW_LATENCY | UPF_FIXED_TYPE;
 	p.iotype = UPIO_MEM;

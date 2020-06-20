@@ -57,16 +57,16 @@ static struct irqaction irq_cascade5 = {
 };
 
 static void rtl838x_ictl_enable_irq(struct irq_data *i)
-{   
+{
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&irq_lock, flags);
-	rtl838x_w32(rtl838x_r32(GIMR) | (1 << ICTL_OFFSET(i->irq)), GIMR);
+	rtl838x_w32_mask(0, 1 << i->irq, GIMR);
 	raw_spin_unlock_irqrestore(&irq_lock, flags);
 }
 
 static unsigned int rtl838x_ictl_startup_irq(struct irq_data *i)
-{   
+{
 	rtl838x_ictl_enable_irq(i);
 	return 0;
 }
@@ -76,22 +76,22 @@ static void rtl838x_ictl_disable_irq(struct irq_data *i)
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&irq_lock, flags);
-	rtl838x_w32(rtl838x_r32(GIMR) & (~(1 << ICTL_OFFSET(i->irq))), GIMR);
+	rtl838x_w32_mask(1 << i->irq, 0, GIMR);
 	raw_spin_unlock_irqrestore(&irq_lock, flags);
 }
 
 
 static void rtl838x_ictl_eoi_irq(struct irq_data *i)
-{   
+{
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&irq_lock, flags); 
-	rtl838x_w32(rtl838x_r32(GIMR) | (1 << ICTL_OFFSET(i->irq)), GIMR);
+	rtl838x_w32_mask(0, 1 << i->irq, GIMR);
 	raw_spin_unlock_irqrestore(&irq_lock, flags);
 }
 
 static struct irq_chip rtl838x_ictl_irq = { 
-	.name = "RTL838X ICTL",
+	.name = "RTL838X",
 	.irq_startup = rtl838x_ictl_startup_irq,
 	.irq_shutdown = rtl838x_ictl_disable_irq,
 	.irq_enable = rtl838x_ictl_enable_irq,
@@ -102,29 +102,21 @@ static struct irq_chip rtl838x_ictl_irq = {
 	.irq_eoi = rtl838x_ictl_eoi_irq,
 };
 
-static void rtl8380_wdt_phase1(void)
-{
-	rtl838x_w32(0x80000000, (volatile void *)(0xb8003154)); /*WDT PH1 IP clear*/
-}
-
-
 /* 
 *   RTL8390/80/28 Interrupt Scheme
 * 
-*   Source       IRQ     EXT_IRQ    CPU INT 
-*   --------   -------   ------   ------- 
-*   UART0          31        39       IP3 
-*   UART1          30        38       IP2 
-*   TIMER0         29        37       IP6 
-*   TIMER1         28        36       IP2 
-*   OCPTO          27        35       IP2
-*   HLXTO          26        34       IP2
-*   SLXTO          25        33       IP2
-*   NIC            24        32       IP5
-*   GPIO_ABCD      23        31       IP5
-*   GPIO_EFGH      22        30       IP5  ==> RTL8328 only
-*   RTC            21        29       IP5  ==> RTL8328 only
-*   SWCORE         20        28       IP4 
+*   Source       IRQ      CPU INT
+*   --------   -------    -------
+*   UART0          31        IP3
+*   UART1          30        IP2
+*   TIMER0         29        IP6
+*   TIMER1         28        IP2
+*   OCPTO          27        IP2
+*   HLXTO          26        IP2
+*   SLXTO          25        IP2
+*   NIC            24        IP5
+*   GPIO_ABCD      23        IP5
+*   SWCORE         20        IP4
 */
 
 unsigned int rtl838x_ictl_irq_dispatch1(void)
@@ -133,9 +125,9 @@ unsigned int rtl838x_ictl_irq_dispatch1(void)
 	unsigned int extint_ip = rtl838x_r32(GIMR) & rtl838x_r32(GISR);
 
 	if (extint_ip & TC1_IP)
-		do_IRQ(RTL838X_TC1_EXT_IRQ);
+		do_IRQ(TC1_IRQ);
 	else if (extint_ip & UART1_IP)
-		do_IRQ(RTL838X_UART1_EXT_IRQ);
+		do_IRQ(UART1_IRQ);
 	else
 		spurious_interrupt();
 
@@ -144,13 +136,13 @@ unsigned int rtl838x_ictl_irq_dispatch1(void)
 
 unsigned int rtl838x_ictl_irq_dispatch2(void)
 {
-	do_IRQ(RTL838X_UART0_EXT_IRQ);
+	do_IRQ(UART0_IRQ);
 	return IRQ_HANDLED;
 }
 
 unsigned int rtl838x_ictl_irq_dispatch3(void)
 {
-	do_IRQ(RTL838X_SWCORE_EXT_IRQ);
+	do_IRQ(SWCORE_IRQ);
 	return IRQ_HANDLED;
 }
 
@@ -160,18 +152,11 @@ unsigned int rtl838x_ictl_irq_dispatch4(void)
 	unsigned int extint_ip = rtl838x_r32(GIMR) & rtl838x_r32(GISR);
 
 	if (extint_ip & NIC_IP)
-		do_IRQ(RTL838X_NIC_EXT_IRQ);
+		do_IRQ(NIC_IRQ);
 	else if (extint_ip & GPIO_ABCD_IP)
-		do_IRQ(RTL838X_GPIO_ABCD_EXT_IRQ);  
+		do_IRQ(GPIO_ABCD_IRQ);
 	else if ((extint_ip & GPIO_EFGH_IP) && (soc_info.family == RTL8328_FAMILY_ID))
-		do_IRQ(RTL838X_GPIO_EFGH_EXT_IRQ);
-	else if (((soc_info.family == RTL8380_FAMILY_ID) 
-		|| (soc_info.family == RTL8330_FAMILY_ID)) && (extint_ip & WDT_IP1_IP))
-		{
-			rtl8380_wdt_phase1();
-			/* WDT Phase-1 */
-			do_IRQ(RTL838X_WDT_IP1_IRQ);
-		}
+		do_IRQ(GPIO_EFGH_IRQ);
 	else
 		spurious_interrupt();
 
@@ -180,7 +165,7 @@ unsigned int rtl838x_ictl_irq_dispatch4(void)
 
 unsigned int rtl838x_ictl_irq_dispatch5(void)
 {
-	do_IRQ(RTL838X_TC0_EXT_IRQ);
+	do_IRQ(TC0_IRQ);
 	return IRQ_HANDLED;
 }
 
@@ -223,10 +208,6 @@ static void __init rtl838x_ictl_irq_init(unsigned int irq_base)
 	rtl838x_w32(TC0_IE | UART0_IE, GIMR);
 	rtl838x_w32(IRR0_SETTING, IRR0);
 	rtl838x_w32(IRR1_SETTING, IRR1);
-	if(soc_info.family  == RTL8328_FAMILY_ID)
-		rtl838x_w32(IRR1_8328_SETTING, IRR1);
-	else
-		rtl838x_w32(IRR1_SETTING, IRR1);
 	rtl838x_w32(IRR2_SETTING, IRR2);
 	rtl838x_w32(IRR3_SETTING, IRR3);
 }
@@ -251,10 +232,10 @@ int __init icu_of_init(struct device_node *node, struct device_node *parent)
 
 	mips_cpu_irq_init();
 
-	domain = irq_domain_add_simple(node, 40, 0, &irq_domain_ops, NULL);
+	domain = irq_domain_add_simple(node, 32, 0, &irq_domain_ops, NULL);
 
 	/* Setup all external HW irqs */
-	for (i = 8; i < 40; i++)
+	for (i = 8; i < 32; i++)
 		irq_domain_associate(domain, i, i);
 
 	rtl838x_ictl_irq_init(RTL838X_IRQ_ICTL_BASE);
