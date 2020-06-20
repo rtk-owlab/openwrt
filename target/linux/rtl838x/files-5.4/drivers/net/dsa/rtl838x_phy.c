@@ -68,6 +68,7 @@ static void rtl8380_phy_reset(int mac)
 
 void rtl8380_sds_rst(int mac)
 {
+	printk("SERDES reset: %d\n", mac);
 	u32 offset = (mac == 24)? 0: 0x100;
 	sw_w32_mask(1 << 11, 0, (volatile void *) (0xbb00f800 + offset));
 	sw_w32_mask(0x3, 0, RTL838X_SDS4_REG28 + offset);
@@ -931,16 +932,16 @@ static u32 rtl8380_sds_release_reset[][2] = {
 	{0, 0}
 };
 
-static int rtl8380_configure_serdes(void)
+static int rtl8380_configure_serdes(struct phy_device *phydev)
 {
 	u32 v;
 	u32 sds_conf_value;
 	int i;
 
-	pr_info("Enabling RTL8380 SerDes\n");
+	phydev_info(phydev, "Detected internal RTL8380 SERDES\n");
 	/* Back up serdes power down value */
 	sds_conf_value = sw_r32(RTL838X_SDS_CFG_REG);
-	pr_debug("SDS power down value: %x\n", sds_conf_value);
+	pr_info("SDS power down value: %x\n", sds_conf_value);
 
 	/* take serdes into reset */
 	i = 0;
@@ -972,7 +973,7 @@ static int rtl8380_configure_serdes(void)
 	v |= 0x4 << 5 | 0x4 ;
 	sw_w32(v, RTL838X_SDS_MODE_SEL);
 
-	pr_debug("PLL control register: %x\n", sw_r32(RTL838X_PLL_CML_CTRL));
+	pr_info("PLL control register: %x\n", sw_r32(RTL838X_PLL_CML_CTRL));
 	sw_w32_mask(0xfffffff0, 0xaaaaaaaf & 0xf, RTL838X_PLL_CML_CTRL);
 	i = 0;
 	while (rtl8380_sds01_qsgmii_6275b[i][0]) {
@@ -1016,13 +1017,13 @@ static int rtl8380_configure_serdes(void)
 		i++;
 	}
 
-	pr_debug("SDS power down value now: %x\n", sw_r32(RTL838X_SDS_CFG_REG));
+	pr_info("SDS power down value now: %x\n", sw_r32(RTL838X_SDS_CFG_REG));
 	sw_w32(sds_conf_value, RTL838X_SDS_CFG_REG);
 
 	/* Fibre port power off, in order to disable LEDs */
 	/* sw_w32_mask( 0, 1 << 11, (volatile void *)0xbb00f800); 
 	sw_w32_mask( 0, 1 << 11, (volatile void *)0xbb00f900); */
-
+	printk("Configuration of SERDES done\n");
 	return 0;
 }
 
@@ -1074,7 +1075,7 @@ static int rtl8218b_int_phy_probe(struct phy_device *phydev)
 
 	if (addr >= 24)
 		return -ENODEV;
-	
+
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
@@ -1107,7 +1108,7 @@ static int rtl838x_serdes_probe(struct phy_device *phydev)
 	/* On the RTL8380M, PHYs 24-27 connect to the internal SerDes */
 	if ((sw_r32(RTL838X_MODEL_NAME_INFO) >> 16) == 0x8380) {
 		if (addr == 24)
-			return rtl8380_configure_serdes();
+			return rtl8380_configure_serdes(phydev);
 		return 0;
 	}
 	return -ENODEV;
