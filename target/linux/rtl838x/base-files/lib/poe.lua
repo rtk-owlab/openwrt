@@ -185,7 +185,7 @@ function getPortPowerLimits(pCon, port)
 	local cmd = {0x26, 0x01, port}
 	local reply = sendCommand(pCon, cmd)
 	if not reply then return(nil) end
-	return(answer)
+	return(reply)
 end
 
 function startupPoE(pCon)
