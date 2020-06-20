@@ -10,6 +10,15 @@
 #define RTL8231_GPIO_PIN_SEL(gpio)		((0x0002) + ((gpio) >> 4))
 #define RTL8231_GPIO_DIR(gpio)			((0x0005) + ((gpio) >> 4))
 #define RTL8231_GPIO_DATA(gpio)			((0x001C) + ((gpio) >> 4))
+#define RTL8231_GPIO_PIN_SEL0			0x0002
+#define RTL8231_GPIO_PIN_SEL1			0x0003
+#define RTL8231_GPIO_PIN_SEL2			0x0004
+#define RTL8231_GPIO_IO_SEL0			0x0005
+#define RTL8231_GPIO_IO_SEL1			0x0006
+#define RTL8231_GPIO_IO_SEL2			0x0007
+
+#define MDC_WAIT { int i; for(i=0; i < 2; i++); }
+#define I2C_WAIT { int i; for(i=0; i < 5; i++); }
 
 struct rtl838x_gpios {
 	struct gpio_chip gc;
@@ -21,7 +30,14 @@ struct rtl838x_gpios {
 	int min_led;
 	int leds_per_port;
 	u32 led_mode;
+	u16 rtl8381_phy_id;
+	int smi_clock;
+	int smi_data;
+	int i2c_sda;
+	int i2c_sdc;
 };
+
+extern struct mutex smi_lock;
 
 /*
 	TODO: TRY TYPE for RST on Zyxel
@@ -36,6 +52,7 @@ u32 rtl838x_rtl8231_read(u8 bus_id, u32 reg)
 	/* Calculate read register address */
 	t = (bus_id << 2) | (reg << 7);
 
+	mutex_lock(&smi_lock);
 	/* Set execution bit: cleared when operation completed */
 	t |= 1;
 	rtl838x_w32(t, RTL838X_EXT_GPIO_INDRT_ACCESS);
@@ -43,6 +60,8 @@ u32 rtl838x_rtl8231_read(u8 bus_id, u32 reg)
 		t = rtl838x_r32(RTL838X_EXT_GPIO_INDRT_ACCESS);
 	} while (t & 1);
 	pr_debug("rtl838x_rtl8231_read: %x, %x, %x\n", bus_id, reg, (t & 0xffff0000) >> 16);
+
+	mutex_unlock(&smi_lock);
 	return (t & 0xffff0000) >> 16;
 }
 
@@ -54,6 +73,7 @@ int rtl838x_rtl8231_write(u8 bus_id, u32 reg, u32 data)
 	bus_id &= 0x1f;
 
 	pr_debug("rtl838x_rtl8231_write: %x, %x, %x\n", bus_id, reg, data);
+	mutex_lock(&smi_lock);
 	t = (bus_id << 2) | (reg << 7) | (data << 16);
 	/* Set write bit */
 	t |= 2;
@@ -65,6 +85,7 @@ int rtl838x_rtl8231_write(u8 bus_id, u32 reg, u32 data)
 		t = rtl838x_r32(RTL838X_EXT_GPIO_INDRT_ACCESS);
 	} while (t & 1);
 
+	mutex_unlock(&smi_lock);
 	return 0;
 }
 
@@ -75,27 +96,31 @@ static int rtl8231_pin_dir(u8 bus_id, u32 gpio, u32 dir)
 	 */
 
 	 u32  v;
+	 int pin_sel_addr = RTL8231_GPIO_PIN_SEL(gpio);
+	 int pin_dir_addr = RTL8231_GPIO_DIR(gpio);
+	 int pin = gpio % 16;
+	 int dpin = pin;
 
 	 if( gpio > 31 ) {
-		 return -1;
-		 pr_err("rtl8231_pin_dir: GPIO >= 32 not implemented!");
+		 dpin = pin << 5;
+		 pin_dir_addr = pin_sel_addr;
 	 }
 
 	/* Select GPIO function for pin */
-	v = rtl838x_rtl8231_read(bus_id, RTL8231_GPIO_PIN_SEL(gpio));
+	v = rtl838x_rtl8231_read(bus_id, pin_sel_addr);
 	if (v & 0x80000000) {
 		pr_err("Error reading RTL8231\n");
 		return -1;
 	}
-	rtl838x_rtl8231_write(bus_id, RTL8231_GPIO_PIN_SEL(gpio), v | (1 << (gpio % 16)));
+	rtl838x_rtl8231_write(bus_id, pin_sel_addr, v | (1 << pin));
 
-	v = rtl838x_rtl8231_read(bus_id, RTL8231_GPIO_DIR(gpio));
+	v = rtl838x_rtl8231_read(bus_id, pin_dir_addr);
 	if (v & 0x80000000) {
 		pr_err("Error reading RTL8231\n");
 		return -1;
 	}
-	rtl838x_rtl8231_write(bus_id, RTL8231_GPIO_DIR(gpio),
-				(v & ~(1 << (gpio % 16))) | (dir << (gpio % 16)));
+	rtl838x_rtl8231_write(bus_id, pin_dir_addr,
+			      (v & ~(1 << dpin)) | (dir << dpin));
 	return 0;
 }
 
@@ -106,14 +131,16 @@ static int rtl8231_pin_dir_get(u8 bus_id, u32 gpio, u32 *dir)
 	 */
 
 	 u32  v;
+	 int pin_dir_addr = RTL8231_GPIO_DIR(gpio);
+	 int pin = gpio % 16;
 	 
 	 if( gpio > 31 ) {
-		 return -1;
-		 pr_err("rtl8231_pin_dir_get: GPIO >= 32 not implemented!");
+		 pin_dir_addr = RTL8231_GPIO_PIN_SEL(gpio);
+		 pin = pin << 5;
 	 }
 
-	v = rtl838x_rtl8231_read(bus_id, RTL8231_GPIO_DIR(gpio));
-	if (v & (1 << (gpio %16)))
+	v = rtl838x_rtl8231_read(bus_id, pin_dir_addr);
+	if (v & (1 << pin))
 		*dir = 1;
 	else
 		*dir = 0;
@@ -322,8 +349,6 @@ void rtl838x_gpio_set (struct gpio_chip *gc, unsigned offset, int value)
 	__asm__ volatile ("sync");
 }
 
-	
-/* Needed for the Zyxel */
 int rtl8231_init(struct rtl838x_gpios *gpios)
 {
 	uint32_t v;
@@ -340,15 +365,254 @@ int rtl8231_init(struct rtl838x_gpios *gpios)
 	rtl838x_w32_mask(0, 1 << RTL838X_GPIO_A1, RTL838X_GPIO_PABC_DATA);
 	mdelay(50); /* wait 50ms for reset */
 
-	/*Select GPIO functionality for pins 0-15 and 16-32*/
+	/*Select GPIO functionality for pins 0-15, 16-31 and 32-37 */
 	rtl838x_rtl8231_write(bus_id, RTL8231_GPIO_PIN_SEL(0), 0xffff);
 	rtl838x_rtl8231_write(bus_id, RTL8231_GPIO_PIN_SEL(16), 0xffff);
+	rtl838x_rtl8231_write(bus_id, RTL8231_GPIO_PIN_SEL2, 0x03ff);
 
 	v = rtl838x_rtl8231_read(bus_id, RTL8231_LED_FUNC0);
 	printk("RTL8231 led function now: %x\n", v);
 
 	printk("rtl8231_init done\n");
 	return 0;
+}
+
+static void smi_write_bit(struct rtl838x_gpios *gpios, u32 bit)
+{
+	if (bit)
+		rtl838x_w32_mask(0, 1 << gpios->smi_data, RTL838X_GPIO_PABC_DATA);
+	else
+		rtl838x_w32_mask(1 << gpios->smi_data, 0, RTL838X_GPIO_PABC_DATA);
+
+	MDC_WAIT;
+	rtl838x_w32_mask(1 << gpios->smi_clock, 0, RTL838X_GPIO_PABC_DATA);
+	MDC_WAIT;
+	rtl838x_w32_mask(0, 1 << gpios->smi_clock, RTL838X_GPIO_PABC_DATA);
+}
+
+static int smi_read_bit(struct rtl838x_gpios *gpios)
+{
+	u32 v;
+
+	MDC_WAIT;
+	rtl838x_w32_mask(1 << gpios->smi_clock, 0, RTL838X_GPIO_PABC_DATA);
+	MDC_WAIT;
+	rtl838x_w32_mask(0, 1 << gpios->smi_clock, RTL838X_GPIO_PABC_DATA);
+
+	v = rtl838x_r32(RTL838X_GPIO_PABC_DATA);
+	if (v & (1 << gpios->smi_data))
+		return 1;
+	return 0;
+}
+
+/* Tri-state of MDIO line */
+static void smi_z(struct rtl838x_gpios *gpios)
+{
+	/* MDIO pin to input */
+	rtl838x_w32_mask(1 << gpios->smi_data, 0, RTL838X_GPIO_PABC_DIR);
+	MDC_WAIT;
+	rtl838x_w32_mask(1 << gpios->smi_clock, 0, RTL838X_GPIO_PABC_DATA);
+	MDC_WAIT;
+	rtl838x_w32_mask(0, 1 << gpios->smi_clock, RTL838X_GPIO_PABC_DATA);
+}
+
+static void smi_write_bits(struct rtl838x_gpios *gpios, u32 data, int len)
+{
+	while (len) {
+		len--;
+		smi_write_bit(gpios, data & (1 << len));
+	}
+}
+
+static void smi_read_bits(struct rtl838x_gpios *gpios, int len, u32 *data)
+{
+	u32 v = 0;
+
+	while (len) {
+		len--;
+		v <<= 1;
+		v |= smi_read_bit(gpios);
+	}
+	*data = v;
+}
+
+/* Bit-banged verson of SMI write access, caller must hold smi_lock */
+int rtl8380_smi_write(struct rtl838x_gpios *gpios, u16 reg, u32 data)
+{
+	u16 bus_id = gpios->bus_id;
+
+	/* Set clock and data pins on RTL838X to output */
+	rtl838x_w32_mask(0, 1 << gpios->smi_clock, RTL838X_GPIO_PABC_DIR);
+	rtl838x_w32_mask(0, 1 << gpios->smi_data, RTL838X_GPIO_PABC_DIR);
+
+	/* Write start bits */
+	smi_write_bits(gpios, 0xffffffff, 32);
+
+	smi_write_bits(gpios, 0x5, 4);		/* ST and write OP */
+
+	smi_write_bits(gpios, bus_id, 5);	/* 5 bits: phy address */
+	smi_write_bits(gpios, reg, 5);		/* 5 bits: register address */
+
+	smi_write_bits(gpios, 0x2, 2);		/* TURNAROUND */
+
+	smi_write_bits(gpios, data, 16);	/* 16 bits: data*/
+
+	smi_z(gpios);
+
+	return 0;
+}
+
+/* Bit-banged verson of SMI read access, caller must hold smi_lock */
+int rtl8380_smi_read(struct rtl838x_gpios *gpios, u16 reg, u32 *data)
+{
+	u16 bus_id = gpios->bus_id;
+
+	/* Set clock and data pins on RTL838X to output */
+	rtl838x_w32_mask(0, 1 << gpios->smi_clock, RTL838X_GPIO_PABC_DIR);
+	rtl838x_w32_mask(0, 1 << gpios->smi_data, RTL838X_GPIO_PABC_DIR);
+
+	/* Write start bits */
+	smi_write_bits(gpios, 0xffffffff, 32);
+
+	smi_write_bits(gpios, 0x6, 4);		/* ST and read OP */
+
+	smi_write_bits(gpios, bus_id, 5);	/* 5 bits: phy address */
+	smi_write_bits(gpios, reg, 5);		/* 5 bits: register address */
+
+	smi_z(gpios);				/* TURNAROUND */
+
+	smi_read_bits(gpios, 16, data);
+	return 0;
+}
+
+static void i2c_pin_set(struct rtl838x_gpios *gpios, int pin, u32 data)
+{
+	u32 v;
+
+	rtl8380_smi_read(gpios, RTL8231_GPIO_DATA(pin), &v);
+	if (!data)
+		v &= ~(1 << (pin % 16));
+	else
+		v |= (1 << (pin % 16));
+	rtl8380_smi_write(gpios, RTL8231_GPIO_DATA(pin), v);
+}
+
+static void i2c_pin_get(struct rtl838x_gpios *gpios, int pin, u32 *data)
+{
+	u32 v;
+	rtl8380_smi_read(gpios, RTL8231_GPIO_DATA(pin), &v);
+	if (v & (1 << (pin % 16))) {
+		*data = 1;
+		return;
+	}
+	*data = 0;
+}
+
+static void i2c_pin_dir(struct rtl838x_gpios *gpios, int pin, u16 direction)
+{
+	u32 v;
+	rtl8380_smi_read(gpios, RTL8231_GPIO_DIR(pin), &v);
+	if (direction) // Output
+		v &= ~(1 << (pin % 16));
+	else
+		v |= (1 << (pin % 16));
+	rtl8380_smi_write(gpios, RTL8231_GPIO_DIR(pin), v);
+}
+
+static void i2c_start(struct rtl838x_gpios *gpios)
+{
+	i2c_pin_dir(gpios, gpios->i2c_sda, 0); /* Output */
+	i2c_pin_dir(gpios, gpios->i2c_sdc, 0); /* Output */
+	I2C_WAIT
+	i2c_pin_set(gpios, gpios->i2c_sdc, 1);
+	I2C_WAIT
+	i2c_pin_set(gpios, gpios->i2c_sda, 1);
+	I2C_WAIT
+	i2c_pin_set(gpios, gpios->i2c_sda, 0);
+	I2C_WAIT
+	i2c_pin_set(gpios, gpios->i2c_sdc, 0);
+	I2C_WAIT
+}
+
+static void i2c_stop(struct rtl838x_gpios *gpios)
+{
+	I2C_WAIT
+	i2c_pin_set(gpios, gpios->i2c_sdc, 1);
+	i2c_pin_set(gpios, gpios->i2c_sda, 0);
+	I2C_WAIT
+
+	i2c_pin_set(gpios, gpios->i2c_sda, 1);
+	I2C_WAIT
+	i2c_pin_set(gpios, gpios->i2c_sdc, 0);
+
+	i2c_pin_dir(gpios, gpios->i2c_sda, 1); /* Input */
+	i2c_pin_dir(gpios, gpios->i2c_sdc, 1); /* Input */
+}
+
+static void i2c_read_bits(struct rtl838x_gpios *gpios, int len, u32 *data)
+{
+	u32 v = 0, t;
+
+	while (len) {
+		len--;
+		v <<= 1;
+
+		i2c_pin_set(gpios, gpios->i2c_sdc, 1);
+		I2C_WAIT
+		i2c_pin_get(gpios, gpios->i2c_sda, &t);
+		v |= t;
+		i2c_pin_set(gpios, gpios->i2c_sdc, 0);
+		I2C_WAIT
+		//v |= i2c_read_bit(gpios);
+	}
+	*data = v;
+}
+
+static void i2c_write_bits(struct rtl838x_gpios *gpios, u32 data, int len)
+{
+	while (len) {
+		len--;
+
+		i2c_pin_set(gpios, gpios->i2c_sda, data & (1 << len));
+		I2C_WAIT
+		i2c_pin_set(gpios, gpios->i2c_sdc, 1);
+		I2C_WAIT
+		i2c_pin_set(gpios, gpios->i2c_sdc, 0);
+		I2C_WAIT
+	}
+}
+
+/* This initializes direct external GPIOs via the RTL8231 */
+int rtl8380_rtl8321_init(struct rtl838x_gpios *gpios)
+{
+	u32 v;
+	int mdc = gpios->smi_clock;
+	int mdio = gpios->smi_data;
+
+	printk("Configuring SMI: Clock %d, Data %d\n", mdc, mdio);
+	rtl838x_w32_mask(0, 0x2, RTL838X_IO_DRIVING_ABILITY_CTRL);
+
+	/* Enter simulated GPIO mode */
+	rtl838x_w32_mask(1, 0, RTL838X_EXTRA_GPIO_CTRL);
+
+	/* MDIO clock to 2.6MHz */
+	rtl838x_w32_mask(0x3 << 8, 0, RTL838X_EXTRA_GPIO_CTRL);
+
+	/* Configure SMI clock and data GPIO pins */
+	rtl838x_w32_mask((1 << mdc) | (1 << mdio), 0, RTL838X_GPIO_PABC_CNR);
+	rtl838x_w32_mask(0, (1 << mdc) | (1 << mdio), RTL838X_GPIO_PABC_DIR);
+
+	rtl8380_smi_write(gpios, RTL8231_GPIO_PIN_SEL0, 0xffff);
+	rtl8380_smi_write(gpios, RTL8231_GPIO_PIN_SEL1, 0xffff);
+	rtl8380_smi_read(gpios, RTL8231_GPIO_PIN_SEL2, &v);
+	v |= 0x1f;
+	rtl8380_smi_write(gpios, RTL8231_GPIO_PIN_SEL2, v);
+
+	rtl8380_smi_write(gpios, RTL8231_GPIO_IO_SEL0, 0xffff);
+	rtl8380_smi_write(gpios, RTL8231_GPIO_IO_SEL1, 0xffff);
+	rtl8380_smi_read(gpios, RTL8231_GPIO_IO_SEL2, &v);
+	v |= 0x1f << 5;
+	rtl8380_smi_write(gpios, RTL8231_GPIO_PIN_SEL2, v);
 }
 
 void rtl8380_led_test(u32 mask)
@@ -503,6 +767,15 @@ static int rtl838x_gpio_probe(struct platform_device *pdev)
 		gpios->bus_id = indirect_bus_id;
 		rtl8231_init(gpios);
 	}
+	if(!of_property_read_u8(np, "smi-bus-id", &indirect_bus_id)) {
+		gpios->bus_id = indirect_bus_id;
+		gpios->smi_clock = RTL838X_GPIO_A2;
+		gpios->smi_data = RTL838X_GPIO_A3;
+		gpios->i2c_sda = 1;
+		gpios->i2c_sdc = 2;
+		rtl8380_rtl8321_init(gpios);
+	}
+
 	if (of_property_read_bool(np, "take-port-leds")) {
 		if(of_property_read_u32(np, "leds-per-port", &gpios->leds_per_port))
 			gpios->leds_per_port = 2;
