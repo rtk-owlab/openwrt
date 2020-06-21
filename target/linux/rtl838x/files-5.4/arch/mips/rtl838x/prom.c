@@ -21,7 +21,6 @@
 #include <asm/cpu.h>
 
 #include <mach-rtl838x.h>
-#include "prom.h"
 
 extern char arcs_cmdline[];
 const void *fdt;
@@ -91,19 +90,6 @@ void __init device_tree_init(void)
 	unflatten_and_copy_device_tree();
 }
 
-void rtl838x_sys_led_on(void)
-{
-	// Switch on sys-led
-	rtl838x_w32_mask(0, 1 << 15, RTL838X_LED_GLB_CTRL);
-	// 0: off 1: rapid blink, 2: slow blink, 3: steady
-	rtl838x_w32_mask(0, 3 << 16, RTL838X_LED_GLB_CTRL);
-}
-
-void rtl838x_sys_led_off(void)
-{
-	rtl838x_w32_mask(1<<15, 0, RTL838X_LED_GLB_CTRL);
-}
-
 static void __init prom_init_cmdline(void)
 {
 	int argc = fw_arg0;
@@ -121,8 +107,6 @@ static void __init prom_init_cmdline(void)
 		}
 	}
 	pr_info("Kernel command line: %s\n", arcs_cmdline);
-	
-	
 }
 
 /* Do basic initialization */
@@ -130,52 +114,53 @@ void __init prom_init(void)
 {
 	uint32_t model;
 
-	pr_info("prom_init called\r\n");
-	
-	model = rtl838x_r32(RTL8380_MODEL_NAME_INFO_ADDR);
-	
-	pr_info("model is %x \r\n", model);
-	
+	pr_info("prom_init called\n");
+	model = rtl838x_r32(RTL838X_MODEL_NAME_INFO);
+	pr_info("RTL838X model is %x\n", model);
 	model = model >> 16 & 0xFFFF;
-	
-	if( (model != 0x8330) && (model != 0x8332) &&(model != 0x8380) && (model != 0x8382) )
-		pr_info("Unknown SOC: %x", model);
-	
+
+	if( (model != 0x8330) && (model != 0x8332)
+		&& (model != 0x8380) && (model != 0x8382) ) {
+			model = rtl838x_r32(RTL839X_MODEL_NAME_INFO);
+			pr_info("RTL839X model is %x\n", model);
+			model = model >> 16 & 0xFFFF;
+	}
+
 	soc_info.id = model;
-	
+
 	switch (model) {
-		case RTL8328_SOC_ID:
+		case 0x8328:
 			soc_info.name="RTL8328";
 			soc_info.family = RTL8328_FAMILY_ID;
 			break;
-		case RTL8380_SOC_ID:
+		case 0x8380:
 			soc_info.name="RTL8380";
 			soc_info.family = RTL8380_FAMILY_ID;
 			break;
-		case RTL8382_SOC_ID:
+		case 0x8382:
 			soc_info.name="RTL8382";
 			soc_info.family = RTL8380_FAMILY_ID;
 			break;
-		case RTL8390_SOC_ID:
+		case 0x8390:
 			soc_info.name="RTL8390";
 			soc_info.family = RTL8390_FAMILY_ID;
 			break;
-		case RTL8391_SOC_ID:
+		case 0x8391:
 			soc_info.name="RTL8391";
 			soc_info.family = RTL8390_FAMILY_ID;
 			break;
-		case RTL8392_SOC_ID:
+		case 0x8392:
 			soc_info.name="RTL8392";
+			soc_info.family = RTL8390_FAMILY_ID;
+			break;
+		case 0x8393:
+			soc_info.name="RTL8393";
 			soc_info.family = RTL8390_FAMILY_ID;
 			break;
 		default:
 			soc_info.name="DEFAULT";
 	}
-		
 	pr_info("SoC Type: %s\n", get_system_type());
-	
 	prom_init_cmdline();
-	
-	rtl838x_sys_led_on();
 }
 

@@ -17,6 +17,7 @@
  
 #define CPU_PORT				28
 #define RTL838X_MAC_PORT_CTRL(port)		(RTL838X_SW_BASE + 0xd560 + (((port) << 7)))
+#define RTL839X_MAC_PORT_CTRL(port)		(RTL838X_SW_BASE + 0x8004 + (((port) << 7)))
 #define RTL838X_DMA_IF_INTR_STS			(RTL838X_SW_BASE + 0x9f54)
 #define RTL838X_DMA_IF_INTR_MSK			(RTL838X_SW_BASE + 0x9f50)
 #define RTL838X_DMA_IF_CTRL			(RTL838X_SW_BASE + 0x9f58)

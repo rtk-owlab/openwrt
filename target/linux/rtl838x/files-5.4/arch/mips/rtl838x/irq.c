@@ -18,7 +18,6 @@
 #include <asm/irq_cpu.h>
 #include <asm/mipsregs.h>
 #include <mach-rtl838x.h>
-#include "prom.h"
 
 extern struct rtl838x_soc_info soc_info;
 

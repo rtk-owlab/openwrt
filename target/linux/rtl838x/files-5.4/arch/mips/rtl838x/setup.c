@@ -26,6 +26,7 @@
 #include "mach-rtl838x.h"
 
 extern int rtl838x_serial_init(void);
+extern struct rtl838x_soc_info soc_info;
 
 struct clk {
 	struct clk_lookup cl;
@@ -39,6 +40,10 @@ u32 pll_reset_value;
 static void rtl838x_restart(char *command)
 {
 	u32 pll = rtl838x_r32(RTL838X_PLL_CML_CTRL);
+	pr_info("Family id: %x\n", soc_info.family);
+
+	if (soc_info.family == RTL8390_FAMILY_ID)
+		rtl838x_w32(0xFFFFFFFF, RTL839X_RST_GLB_CTRL);
 
 	pr_info("PLL control register: %x, applying reset value %x\n",
 		pll, pll_reset_value);
@@ -49,7 +54,7 @@ static void rtl838x_restart(char *command)
 	printk("System restart.\n");
 
 	/* Reset Global Control1 Register */
-	rtl838x_w32(1, (volatile void *)0xBB000040);
+	rtl838x_w32(1, RTL838X_RST_GLB_CTRL_1);
 }
 
 static void rtl838x_halt(void)

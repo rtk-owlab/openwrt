@@ -22,6 +22,10 @@ define Device/Default
   IMAGE/sysupgrade.bin := append-kernel | pad-to 64k | append-rootfs | pad-rootfs | append-metadata | check-size $$$$(IMAGE_SIZE)
 endef
 
+define Build/netgear-uImage
+	$(call Build/uImage,$(1) -M $(NETGEAR_KERNEL_MAGIC))
+endef
+
 define Device/d-link_dgs-1210-10p
   SOC := rtl8382
   IMAGE_SIZE := 13824k
@@ -48,6 +52,18 @@ define Device/inaba_aml2-17gp
   DEVICE_PACKAGES := ip-bridge ethtool
 endef
 TARGET_DEVICES += inaba_aml2-17gp
+
+define Device/netgear_gs728tpv2
+  SOC := rtl8393
+  IMAGE_SIZE := 13824k
+  NETGEAR_KERNEL_MAGIC := 0x174e4742
+  KERNEL := kernel-bin | append-dtb | lzma -d20 | netgear-uImage lzma
+  KERNEL_INITRAMFS := kernel-bin | append-dtb | lzma -d20 | netgear-uImage lzma
+  DEVICE_VENDOR := Netgear
+  DEVICE_MODEL := GS728TPv2
+  DEVICE_PACKAGES := ip-full ip-bridge ethtool tc
+endef
+TARGET_DEVICES += netgear_gs728tpv2
 
 define Device/tp-link_t2500g-10ts
   SOC := rtl8380

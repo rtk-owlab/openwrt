@@ -288,15 +288,11 @@
 #define MC_DTCR_VAL		0xFFFF05C0
 
 /*
- * Reset
- */
-#define	RGCR			0xBB001E70
-
-/*
  * GPIO
  */
 #define RTL838X_SWITCH_BASE		((volatile void *) 0xBB000000)
 #define RTL838X_MODEL_NAME_INFO		(RTL838X_SWITCH_BASE + 0x00D4)
+#define RTL839X_MODEL_NAME_INFO		(RTL838X_SWITCH_BASE + 0x0FF0)
 #define RTL838X_LED_GLB_CTRL		((volatile void *) 0xBB00A000)
 #define GPIO_CTRL_REG_BASE		((volatile void *) 0xb8003500)
 #define RTL838X_GPIO_PABC_CNR		(GPIO_CTRL_REG_BASE + 0x0)
@@ -353,6 +349,13 @@
 #define RTL838X_PLL_CML_CTRL		(RTL838X_SWITCH_BASE + 0xFF8)
 #define RTL838X_STRAP_DBG		(RTL838X_SWITCH_BASE + 0x100C)
 
+/*
+ * Reset
+ */
+#define	RGCR				(RTL838X_SWITCH_BASE + 0xBB001E70)
+#define RTL839X_RST_GLB_CTRL		(RTL838X_SWITCH_BASE + 0x14)
+#define RTL838X_RST_GLB_CTRL_1		(RTL838X_SWITCH_BASE + 0x40)
+
 /* LED control by switch */
 #define RTL838X_LED_MODE_SEL		(RTL838X_SWITCH_BASE + 0x1004)
 #define RTL838X_LED_MODE_CTRL		(RTL838X_SWITCH_BASE + 0xA004)
@@ -383,5 +386,22 @@
 #define RTL838X_IMR_PORT_LINK_STS_CHG	(RTL838X_SWITCH_BASE + 0x1104)
 #define RTL838X_ISR_GLB_SRC		(RTL838X_SWITCH_BASE + 0x1148)
 #define RTL838X_ISR_PORT_LINK_STS_CHG	(RTL838X_SWITCH_BASE + 0x114C)
+
+/* Definition of family IDs */
+#define RTL8389_FAMILY_ID   (0x8389)
+#define RTL8328_FAMILY_ID   (0x8328)
+#define RTL8390_FAMILY_ID   (0x8390)
+#define RTL8350_FAMILY_ID   (0x8350)
+#define RTL8380_FAMILY_ID   (0x8380)
+#define RTL8330_FAMILY_ID   (0x8330)
+
+struct rtl838x_soc_info {
+	unsigned char *name;
+	unsigned int id;
+	unsigned int family;
+	unsigned char *compatible;
+};
+
+void rtl838x_soc_detect(struct rtl838x_soc_info *i);
 
 #endif   /* _MACH_RTL838X_H_ */

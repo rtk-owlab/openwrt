@@ -69,7 +69,8 @@ struct rtl838x_eth_priv {
 	struct napi_struct napi;
 	struct phylink *phylink;
 	struct phylink_config phylink_config;
-	u32 id;
+	u16 id;
+	u16 family_id;
 };
 
 extern int rtl838x_phy_init(struct rtl838x_eth_priv *priv);
@@ -146,19 +147,23 @@ static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void rtl838x_hw_reset(void)
-{	
+static void rtl838x_hw_reset(struct rtl838x_eth_priv *priv)
+{
+	volatile void *rst_reg = RTL838X_RST_GLB_CTRL_0;
+	if(priv->family_id == 0x8390)
+		rst_reg = RTL839X_RST_GLB_CTRL;
+
 	/* Stop TX/RX */
 	sw_w32(0x0, RTL838X_MAC_PORT_CTRL(CPU_PORT));
 	mdelay(500);
 
 	/* Reset NIC */
-	sw_w32(0x08, RTL838X_RST_GLB_CTRL_0);
+	sw_w32(0x08, rst_reg);
 	mdelay(200);
 
 	do {
 		udelay(20);
-	} while (sw_r32(RTL838X_RST_GLB_CTRL_0));
+	} while (sw_r32(rst_reg));
 	mdelay(100);
 
 	/* Restart TX/RX to CPU_PORT */
@@ -252,7 +257,7 @@ static int rtl838x_eth_open(struct net_device *ndev)
 
 	printk("rtl838x_eth_open called %x, ring %x\n", (uint32_t)priv, (uint32_t)ring);
 	spin_lock_irqsave(&priv->lock, flags);
-	rtl838x_hw_reset();
+	rtl838x_hw_reset(priv);
 	rtl838x_setup_ring_buffer(ring);
 	rtl838x_hw_ring_setup(priv);
 	err = request_irq(ndev->irq, rtl838x_net_irq, IRQF_SHARED,
@@ -702,7 +707,6 @@ static int rtl838x_mac_pcs_get_state(struct phylink_config *config,
 	case 1:
 		state->speed = SPEED_100;
 		break;
-	case 2:
 		state->speed = SPEED_1000;
 		break;
 	default:
@@ -1026,12 +1030,23 @@ static int __init rtl838x_eth_probe(struct platform_device *pdev)
 	switch (priv->id) {
 	case 0x8332:
 		printk("Found RTL8332M\n");
+		priv->family_id = 0x8380;
 		break;
 	case 0x8380:
 		printk("Found RTL8380M\n");
+		priv->family_id = 0x8380;
 		break;
 	case 0x8382:
 		printk("Found RTL8382M\n");
+		priv->family_id = 0x8380;
+		break;
+	case 0x8390:
+		printk("Found RTL8390M\n");
+		priv->family_id = 0x8390;
+		break;
+	case 0x8393:
+		printk("Found RTL8393M\n");
+		priv->family_id = 0x8390;
 		break;
 	default:
 		printk("Unknown chip id (%04x)\n", priv->id);
