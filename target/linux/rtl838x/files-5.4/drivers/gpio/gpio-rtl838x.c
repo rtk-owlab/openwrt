@@ -613,6 +613,8 @@ int rtl8380_rtl8321_init(struct rtl838x_gpios *gpios)
 	rtl8380_smi_read(gpios, RTL8231_GPIO_IO_SEL2, &v);
 	v |= 0x1f << 5;
 	rtl8380_smi_write(gpios, RTL8231_GPIO_PIN_SEL2, v);
+
+	return 0;
 }
 
 void rtl8380_led_test(u32 mask)
