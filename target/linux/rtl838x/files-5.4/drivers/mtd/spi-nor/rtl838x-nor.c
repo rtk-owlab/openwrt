@@ -16,6 +16,8 @@
 #include "rtl838x-spi.h"
 #include <asm/mach-rtl838x/mach-rtl838x.h>
 
+extern struct rtl838x_soc_info soc_info;
+
 struct rtl838x_nor {
 	struct spi_nor nor;
 	struct device *dev;
@@ -119,6 +121,13 @@ static int rtl838x_get_addr_mode(void)
 	}
 	rtl838x_w32(0x0, RTL838X_INT_RW_CTRL);
 	return res;
+}
+
+static int rtl8390_get_addr_mode(void)
+{
+	if(rtl838x_r32(RTL8390_SOC_SPI_MMIO_CONF) & (1 << 9))
+		return 4;
+	return 3;
 }
 
 ssize_t rtl838x_do_read(struct rtl838x_nor *nor, loff_t from,
@@ -550,7 +559,6 @@ int rtl838x_nor_init(struct rtl838x_nor *rtl838x_nor,
 	return ret;
 }
 
-
 static int rtl838x_nor_drv_probe(struct platform_device *pdev)
 {
 	struct device_node *flash_np;
@@ -560,6 +568,7 @@ static int rtl838x_nor_drv_probe(struct platform_device *pdev)
 	int addrMode;
 
 	pr_info("Initializing rtl838x_nor_driver\n");
+	rtl8390_test();
 	if (!pdev->dev.of_node) {
 		dev_err(&pdev->dev, "No DT found\n");
 		return -EINVAL;
@@ -586,7 +595,10 @@ static int rtl838x_nor_drv_probe(struct platform_device *pdev)
 	}
 
 	/* Get the 3/4 byte address mode as configure by bootloader */
-	addrMode = rtl838x_get_addr_mode();
+	if (soc_info.family == RTL8390_FAMILY_ID)
+		addrMode = rtl8390_get_addr_mode();
+	else
+		addrMode = rtl838x_get_addr_mode();
 	pr_info("Address mode is %d bytes\n", addrMode);
 	if (addrMode == 4)
 		rtl838x_nor->fourByteMode = true;
@@ -595,6 +607,7 @@ static int rtl838x_nor_drv_probe(struct platform_device *pdev)
 
 nor_free:
 	
+	printk("Last\n"); rtl8390_test();
 	return ret;
 }
 

@@ -79,6 +79,8 @@
 
 #define IOSTATUS_CIO_MASK (0x00000038)
 
+#define RTL8390_SOC_SPI_MMIO_CONF ((volatile void *) (0xB8001204))
+
 /* Chip select: bits 4-7*/
 #define CS0 (1<<4)
 #define R_MODE 0x04
