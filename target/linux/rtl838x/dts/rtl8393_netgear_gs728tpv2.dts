@@ -131,42 +131,34 @@
 		phy8: ethernet-phy@8 {
 			reg = <8>;
 			compatible = "ethernet-phy-ieee802.3-c22";
-			phy-is-integrated;
 		};
 		phy9: ethernet-phy@9 {
 			reg = <9>;
 			compatible = "ethernet-phy-ieee802.3-c22";
-			phy-is-integrated;
 		};
 		phy10: ethernet-phy@10 {
 			reg = <10>;
 			compatible = "ethernet-phy-ieee802.3-c22";
-			phy-is-integrated;
 		};
 		phy11: ethernet-phy@11 {
 			reg = <11>;
 			compatible = "ethernet-phy-ieee802.3-c22";
-			phy-is-integrated;
 		};
 		phy12: ethernet-phy@12 {
 			reg = <12>;
 			compatible = "ethernet-phy-ieee802.3-c22";
-			phy-is-integrated;
 		};
 		phy13: ethernet-phy@13 {
 			reg = <13>;
 			compatible = "ethernet-phy-ieee802.3-c22";
-			phy-is-integrated;
 		};
 		phy14: ethernet-phy@14 {
 			reg = <14>;
 			compatible = "ethernet-phy-ieee802.3-c22";
-			phy-is-integrated;
 		};
 		phy15: ethernet-phy@15 {
 			reg = <15>;
 			compatible = "ethernet-phy-ieee802.3-c22";
-			phy-is-integrated;
 		};
 		
 		/* External phy: RTL8214FC */

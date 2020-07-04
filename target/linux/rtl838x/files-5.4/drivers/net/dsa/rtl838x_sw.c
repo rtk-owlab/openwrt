@@ -18,7 +18,10 @@
 #include "rtl838x.h"
 
 #define RTL8380_VERSION_A 'A'
+#define RTL8390_VERSION_A 'A'
 #define RTL8380_VERSION_B 'B'
+
+extern struct rtl838x_soc_info soc_info;
 
 DEFINE_MUTEX(smi_lock);
 
@@ -35,6 +38,89 @@ struct rtl838x_mib_desc {
 	unsigned int size;
 	unsigned int offset;
 	const char *name;
+};
+
+inline void rtl838x_mask_port_reg(u64 clear, u64 set, volatile void __iomem *reg)
+{
+	sw_w32_mask((u32)clear, (u32)set, reg);
+}
+
+inline void rtl839x_mask_port_reg(u64 clear, u64 set, volatile void __iomem *reg)
+{
+	sw_w32_mask( (u32) (clear >> 32), (u32) (set >> 32), reg);
+	sw_w32_mask( (u32) (clear & 0xffffffff), (u32) (set & 0xffffffff), reg + 4);
+}
+
+inline void rtl838x_set_port_reg(u64 set, volatile void __iomem *reg)
+{
+	sw_w32(set, reg);
+}
+
+inline void rtl839x_set_port_reg(u64 set, volatile void __iomem *reg)
+{
+	sw_w32(set >> 32, reg);
+	sw_w32(set & 0xffffffff, reg + 4);
+}
+
+inline volatile void __iomem *rtl838x_stat_port_std_mib(int p)
+{
+	return RTL838X_STAT_PORT_STD_MIB + (p << 8);
+}
+
+inline volatile void __iomem *rtl839x_stat_port_std_mib(int p)
+{
+	return RTL839X_STAT_PORT_STD_MIB + (p << 8);
+}
+
+inline void rtl838x_mask_port_iso_ctrl(u64 clear, u64 set, int port)
+{
+	sw_w32_mask(clear, set, RTL838X_PORT_ISO_CTRL(port));
+}
+
+inline void rtl839x_mask_port_iso_ctrl(u64 clear, u64 set, int port)
+{
+	sw_w32_mask(clear >> 32, set >> 32, RTL839X_PORT_ISO_CTRL(port));
+	sw_w32_mask(clear & 0xffffffff, set & 0xffffffff,
+			RTL839X_PORT_ISO_CTRL(port) + 4);
+}
+
+inline void rtl838x_set_port_iso_ctrl(u64 set, int port)
+{
+	sw_w32(set, RTL838X_PORT_ISO_CTRL(port));
+}
+
+inline void rtl839x_set_port_iso_ctrl(u64 set, int port)
+{
+	sw_w32(set >> 32, RTL839X_PORT_ISO_CTRL(port));
+	sw_w32(set & 0xffffffff, RTL839X_PORT_ISO_CTRL(port) + 4);
+}
+
+static const struct rtl838x_reg rtl838x_reg = {
+	.mask_port_reg = rtl838x_mask_port_reg,
+	.set_port_reg = rtl838x_set_port_reg,
+	.stat_port_rst = RTL838X_STAT_PORT_RST,
+	.stat_rst = RTL838X_STAT_RST,
+	.stat_port_std_mib = rtl838x_stat_port_std_mib,
+	.mask_port_iso_ctrl = rtl838x_mask_port_iso_ctrl,
+	.set_port_iso_ctrl = rtl838x_set_port_iso_ctrl,
+	.l2_ctrl_0 = RTL838X_L2_CTRL_0,
+	.l2_ctrl_1 = RTL838X_L2_CTRL_1,
+	.l2_ctrl_port_aging_out = RTL838X_L2_PORT_AGING_OUT,
+	.smi_poll_ctrl = RTL838X_SMI_POLL_CTRL,
+};
+
+static const struct rtl838x_reg rtl839x_reg = {
+	.mask_port_reg = rtl839x_mask_port_reg,
+	.set_port_reg = rtl839x_set_port_reg,
+	.stat_port_rst = RTL839X_STAT_PORT_RST,
+	.stat_rst = RTL839X_STAT_RST,
+	.stat_port_std_mib = rtl839x_stat_port_std_mib,
+	.mask_port_iso_ctrl = rtl839x_mask_port_iso_ctrl,
+	.set_port_iso_ctrl = rtl839x_set_port_iso_ctrl,
+	.l2_ctrl_0 = RTL839X_L2_CTRL_0,
+	.l2_ctrl_1 = RTL839X_L2_CTRL_1,
+	.l2_ctrl_port_aging_out = RTL838X_L2_PORT_AGING_OUT,
+	.smi_poll_ctrl = RTL839X_SMI_PORT_POLLING_CTRL,
 };
 
 static const struct rtl838x_mib_desc rtl838x_mib[] = {
@@ -178,6 +264,41 @@ timeout:
 	return -ETIMEDOUT;
 }
 
+int rtl839x_write_phy(u32 port, u32 page, u32 reg, u32 val)
+{
+	u32 v;
+	int err = 0;
+	val &= 0xffff;
+
+	if (port > 63 || page > 4095 || reg > 31)
+		return -ENOTSUPP;
+
+	mutex_lock(&smi_lock);
+	/* Clear both port registers */
+	sw_w32(0, RTL839X_PHYREG_PORT_CTRL(0));
+	sw_w32(0, RTL839X_PHYREG_PORT_CTRL(0) + 4);
+	sw_w32_mask(0, 1 << port, RTL839X_PHYREG_PORT_CTRL(port));
+
+	sw_w32_mask(0xffff0000, val << 16, RTL839X_PHYREG_DATA_CTRL);
+
+	v = reg << 5 | page << 10 | ((page == 0x1fff)? 0x1f: 0) << 23;
+	sw_w32(v, RTL839X_PHYREG_ACCESS_CTRL);
+
+	sw_w32(0x1ff, RTL839X_PHYREG_CTRL);
+
+	v |= 1 << 3 | 1; /* Write operation and execute */
+	sw_w32(v, RTL839X_PHYREG_ACCESS_CTRL);
+
+	do {
+	} while(sw_r32(RTL839X_PHYREG_ACCESS_CTRL) & 0x1);
+
+	if(sw_r32(RTL839X_PHYREG_ACCESS_CTRL) & 0x2)
+		err = -EIO;
+
+	mutex_unlock(&smi_lock);
+	return err;
+}
+
 /* 
  * Reads a register in a page from the PHY
  */
@@ -214,6 +335,50 @@ int rtl838x_read_phy(u32 port, u32 page, u32 reg, u32 *val)
 timeout:
 	mutex_unlock(&smi_lock);
 	return -ETIMEDOUT;
+}
+
+int rtl839x_read_phy(u32 port, u32 page, u32 reg, u32 *val)
+{
+	u32 v;
+
+	if (port > 63 || page > 4095 || reg > 31)
+		return -ENOTSUPP;
+
+	mutex_lock(&smi_lock);
+
+	sw_w32_mask(0xffff0000, port << 16, RTL839X_PHYREG_DATA_CTRL);
+	v = reg << 5 | page << 10 | ((page == 0x1fff)? 0x1f: 0) << 23;
+	sw_w32(v, RTL839X_PHYREG_ACCESS_CTRL);
+
+	sw_w32(0x1ff, RTL839X_PHYREG_CTRL);
+
+	v |= 1;
+	sw_w32(v, RTL839X_PHYREG_ACCESS_CTRL);
+
+	do {
+	} while(sw_r32(RTL839X_PHYREG_ACCESS_CTRL) & 0x1);
+
+	*val = sw_r32(RTL839X_PHYREG_DATA_CTRL) & 0xffff;
+/*	printk("PHY-read: port %d, page %x, reg %x res: %x\n", port, page, reg, *val)); */
+
+	mutex_unlock(&smi_lock);
+	return 0;
+}
+
+static int read_phy(u32 port, u32 page, u32 reg, u32 *val)
+{
+	if (soc_info.family == RTL8390_FAMILY_ID)
+		return rtl839x_read_phy(port, page, reg, val);
+	else
+		return rtl838x_read_phy(port, page, reg, val);
+}
+
+static int write_phy(u32 port, u32 page, u32 reg, u32 val)
+{
+	if (soc_info.family == RTL8390_FAMILY_ID)
+		return rtl839x_write_phy(port, page, reg, val);
+	else
+		return rtl838x_write_phy(port, page, reg, val);
 }
 
 /*
@@ -296,21 +461,10 @@ static void rtl8380_get_version(struct rtl838x_switch_priv *priv)
 	u32 rw_save, info_save;
 	u32 info;
 
-	priv->id = sw_r32(RTL838X_MODEL_NAME_INFO) >> 16;
-	
-	switch (priv->id) {
-	case 0x8332:
-		printk("Found RTL8332M\n");
-		break;
-	case 0x8380:
-		printk("Found RTL8380M\n");
-		break;
-	case 0x8382:
-		printk("Found RTL8382M\n");
-		break;
-	default:
+	if (priv->id) {
+		printk("SoC ID: %4x: %s\n", priv->id, soc_info.name);
+	} else {
 		pr_err("Unknown chip id (%04x)\n", priv->id);
-		priv->id = 0;
 	}
 
 	rw_save = sw_r32(RTL838X_INT_RW_CTRL);
@@ -336,6 +490,14 @@ static void rtl8380_get_version(struct rtl838x_switch_priv *priv)
 	}
 }
 
+static void rtl8390_get_version(struct rtl838x_switch_priv *priv)
+{
+	u32 info;
+	sw_w32_mask(0xf << 28, 0xa << 28, RTL839X_CHIP_INFO);
+	info = sw_r32(RTL839X_CHIP_INFO);
+	printk("Chip-Info: %x\n", info);
+	priv->version = RTL8390_VERSION_A;
+}
 
 int dsa_phy_read(struct dsa_switch *ds, int phy_addr, int phy_reg)
 {
@@ -352,7 +514,7 @@ int dsa_phy_read(struct dsa_switch *ds, int phy_addr, int phy_reg)
 		return val;
 	}
 
-	rtl838x_read_phy(phy_addr, 0, phy_reg, &val);
+	read_phy(phy_addr, 0, phy_reg, &val);
 //	printk("PHY-read: port %d reg: %x res: %x\n", phy_addr, phy_reg, val);
 	return val;
 }
@@ -370,7 +532,7 @@ int dsa_phy_write(struct dsa_switch *ds, int phy_addr, int phy_reg, u16 val)
 		sw_w32(val, MAPLE_SDS4_FIB_REG0r + offset + (phy_reg << 2));
 		return 0;
 	}
-	return rtl838x_write_phy(phy_addr, 0, phy_reg, val);
+	return write_phy(phy_addr, 0, phy_reg, val);
 }
 
 static int rtl838x_mdio_read(struct mii_bus *bus, int addr, int regnum)
@@ -391,21 +553,24 @@ static int rtl838x_mdio_write(struct mii_bus *bus, int addr, int regnum,
 	return dsa_phy_write(priv->ds, addr, regnum, val);
 }
 
-static void rtl8380_enable_phy_polling(struct rtl838x_switch_priv *priv)
+static void rtl838x_enable_phy_polling(struct rtl838x_switch_priv *priv)
 {
 	int i;
-	u32 v = 0;
+	u64 v = 0;
 
 	msleep(1000);
 	/* Enable all ports with a PHY, including the SFP-ports */
-	for (i = 0; i < 28; i++) {
+	for (i = 0; i < priv->cpu_port; i++) {
 		if (priv->ports[i].phy) v |= 1 << i;
 	}
-	printk("rtl8300_enable_phy_polling: %8x\n", v);
-	
-	sw_w32(v, RTL838X_SMI_POLL_CTRL);
+	printk("rtl83xx_enable_phy_polling: %16llx\n", v);
+	priv->r->set_port_reg(v, priv->r->smi_poll_ctrl);
+
 	/* PHY update complete */
-	sw_w32_mask(0, 0x8000, RTL838X_SMI_GLB_CTRL);
+	if (priv->family_id == RTL8390_FAMILY_ID)
+		sw_w32_mask(1 << 7, 0, RTL839X_SMI_GLB_CTRL);
+	else
+		sw_w32_mask(0, 0x8000, RTL838X_SMI_GLB_CTRL);
 }
 
 void print_matrix(void)
@@ -420,39 +585,52 @@ void print_matrix(void)
 	printk("> %8x %8x %8x %8x %8x\n", ptr[24], ptr[25], ptr[26], ptr[27], ptr[28]);
 }
 
+static void rtl838x_init_stats(struct rtl838x_switch_priv *priv)
+{
+	mutex_lock(&priv->reg_mutex);
+
+	/* Enable statistics module: all counters plus debug.
+	   On RTL839x all counters are enabled by default */
+	if (priv->family_id == RTL8380_FAMILY_ID)
+		sw_w32_mask(0, 3, RTL838X_STAT_CTRL);
+
+	/* Reset statistics counters */
+	sw_w32_mask(0, 1, priv->r->stat_rst);
+
+	mutex_unlock(&priv->reg_mutex);
+}
+
 static int rtl838x_setup(struct dsa_switch *ds)
 {
 	int i;
-	u32 port_bitmap = 0;
+	u64 port_bitmap = 0;
 	struct rtl838x_switch_priv *priv = ds->priv;
-	
+
+	printk("rtl838x_setup called\n");
 	/* Disable MAC polling the PHY so that we can start configuration */
-	sw_w32(0x00000000, RTL838X_SMI_POLL_CTRL);
+	priv->r->set_port_reg(0, priv->r->smi_poll_ctrl);
 
 	for (i = 0; i < ds->num_ports; i++)
 		priv->ports[i].enable = false;
-	priv->ports[CPU_PORT].enable = true;
+	priv->ports[priv->cpu_port].enable = true;
 	
 	/* Isolate ports from each other: traffic only CPU <-> port */
-	for (i = 0; i < CPU_PORT; i++) {
+	for (i = 0; i < priv->cpu_port; i++) {
 		if (priv->ports[i].phy) {
-			sw_w32(1 << CPU_PORT, RTL838X_PORT_ISO_CTRL(i));
-			sw_w32_mask(0, 1 << i, RTL838X_PORT_ISO_CTRL(i));
+			priv->r->set_port_iso_ctrl(1 << priv->cpu_port, i);
+			priv->r->mask_port_iso_ctrl(0, 1 << i, i);
 			port_bitmap |= 1 << i;
 		}
 	}
 //	printk("Port-isolation bitmap: %8x\n", port_bitmap);
-	sw_w32(port_bitmap, RTL838X_PORT_ISO_CTRL(CPU_PORT));
-	
+	priv->r->set_port_iso_ctrl(port_bitmap, priv->cpu_port);
+
 	print_matrix();
-	
-	/* Enable statistics module */
-	sw_w32_mask(0, 3, RTL838X_STAT_CTRL);
-	/* Reset statistics counters */
-	sw_w32_mask(0, 1, RTL838X_STAT_RST);
-	
+
+	rtl838x_init_stats(priv);
+
 	/* Enable MAC Polling PHY again */
-	rtl8380_enable_phy_polling(priv);
+	rtl838x_enable_phy_polling(priv);
 	printk("Please wait until PHY is settled\n");
 	msleep(1000);
 	return 0;
@@ -474,6 +652,7 @@ static void rtl838x_get_strings(struct dsa_switch *ds,
 static void rtl838x_get_ethtool_stats(struct dsa_switch *ds, int port,
 				      uint64_t *data)
 {
+	struct rtl838x_switch_priv *priv = ds->priv;
 	const struct rtl838x_mib_desc *mib;
 	int i;
 	u64 high;
@@ -481,9 +660,9 @@ static void rtl838x_get_ethtool_stats(struct dsa_switch *ds, int port,
 	for (i = 0; i < ARRAY_SIZE(rtl838x_mib); i++) {
 		mib = &rtl838x_mib[i];
 
-		data[i] = sw_r32(RTL838X_STAT_PORT_STD_MIB(port) + 252 - mib->offset);
+		data[i] = sw_r32(priv->r->stat_port_std_mib(port) + 252 - mib->offset);
 		if (mib->size == 2) {
-			high = sw_r32(RTL838X_STAT_PORT_STD_MIB(port) + 252 - mib->offset - 4);
+			high = sw_r32(priv->r->stat_port_std_mib(port) + 252 - mib->offset - 4);
 			data[i] |= high << 32;
 		}
 	}
@@ -506,10 +685,10 @@ rtl838x_get_tag_protocol(struct dsa_switch *ds, int port)
 	return DSA_TAG_PROTO_TRAILER;
 }
 
-static int rtl838x_get_l2aging(void)
+static int rtl838x_get_l2aging(struct rtl838x_switch_priv *priv)
 {
-	int t = sw_r32(RTL838X_L2_CTRL_1) & 0x7fffff;
-	printk("RTL838X_L2_CTRL_1 %x\n", sw_r32(RTL838X_L2_CTRL_1));
+	int t = sw_r32(priv->r->l2_ctrl_1) & 0x7fffff;
+	printk("RTL838X_L2_CTRL_1 %x\n", sw_r32(priv->r->l2_ctrl_1));
 
 	t = t * 128 / 625; /* Aging time in seconds. 0: L2 aging disabled */
 	pr_info("L2 AGING time: %d sec\n", t);
@@ -523,13 +702,14 @@ static int rtl838x_get_l2aging(void)
  */
 static int rtl838x_set_l2aging(struct dsa_switch *ds, u32 t)
 {
+	struct rtl838x_switch_priv *priv = ds->priv;
 	/* Convert time in mseconds to internal value */
 	if (t > 0x10000000) /* Set to maximum */
 		t = 0x7fffff;
 	else
 		t = ((t * 625) / 1000 + 127) / 128;
 
-	sw_w32(t, RTL838X_L2_CTRL_1);
+	sw_w32(t, priv->r->l2_ctrl_1);
 
 	return 0;
 }
@@ -560,11 +740,11 @@ static void rtl838x_fast_age(struct dsa_switch *ds, int port)
 /*
  * Applies the same hash algorithm as the one used currently by the ASIC
  */
-static u32 rtl838x_hash(u64 seed)
+static u32 rtl838x_hash(struct rtl838x_switch_priv *priv, u64 seed)
 {
 	u32 h1, h2, h3, h;
 
-	if (sw_r32(RTL838X_L2_CTRL_0) & 1) {
+	if (sw_r32(priv->r->l2_ctrl_0) & 1) {
 		h1 = (seed >> 11) & 0x7ff;
 		h1 = ((h1 & 0x1f) << 6) | ((h1 >> 5) & 0x3f);
 
@@ -585,9 +765,9 @@ static u32 rtl838x_hash(u64 seed)
 	return h;
 }
 
-static u64 rtl838x_hash_key(u64 mac, u32 vid)
+static u64 rtl838x_hash_key(struct rtl838x_switch_priv *priv, u64 mac, u32 vid)
 {
-	return rtl838x_hash(mac << 12 | vid);
+	return rtl838x_hash(priv, mac << 12 | vid);
 }
 
 static u64 read_l2_entry_using_hash(u32 hash, u32 position, u32 *r)
@@ -719,7 +899,7 @@ static int rtl838x_port_fdb_del(struct dsa_switch *ds, int port,
 {
 	struct rtl838x_switch_priv *priv = ds->priv;
 	u64 mac = ether_addr_to_u64(addr);
-	u32 key = rtl838x_hash_key(mac, vid);
+	u32 key = rtl838x_hash_key(priv, mac, vid);
 	int i;
 	u32 r[3];
 	u64 entry;
@@ -772,7 +952,7 @@ static int rtl838x_port_fdb_add(struct dsa_switch *ds, int port,
 {
 	struct rtl838x_switch_priv *priv = ds->priv;
 	u64 mac = ether_addr_to_u64(addr);
-	u32 key = rtl838x_hash_key(mac, vid);
+	u32 key = rtl838x_hash_key(priv, mac, vid);
 	int i;
 	u32 r[3];
 	int idx = -1;
@@ -1030,7 +1210,7 @@ static int rtl838x_vlan_filtering(struct dsa_switch *ds, int port,
 
 	if (vlan_filtering) {
 		/* Enable ingress and egress filtering */
-		if (port != CPU_PORT) {
+		if (port != priv->cpu_port) {
 			if (port < 16) {
 				sw_w32_mask(0b10 << (port << 1),
 					    0b01 << (port << 1),
@@ -1044,7 +1224,7 @@ static int rtl838x_vlan_filtering(struct dsa_switch *ds, int port,
 		sw_w32_mask(0, 1 << port, RTL838X_VLAN_PORT_EGR_FLTR);
 	} else { 
 		/* Disable ingress and egress filtering */
-		if (port != CPU_PORT) {
+		if (port != priv->cpu_port) {
 			if (port < 16) {
 				sw_w32_mask(0b11 << (port << 1),
 					    0,
@@ -1177,7 +1357,7 @@ static void rtl838x_port_bridge_leave (struct dsa_switch *ds, int port,
 				      struct net_device *bridge)
 {
 	struct rtl838x_switch_priv *priv = ds->priv;
-	u32 port_bitmap = 1 << CPU_PORT;
+	u64 port_bitmap = 1 << priv->cpu_port;
 	int i;
 
 	printk("port_bridge_leave %x: %d", (u32)priv, port);
@@ -1191,9 +1371,8 @@ static void rtl838x_port_bridge_leave (struct dsa_switch *ds, int port,
 		if (dsa_is_user_port(ds, i) && i != port) {
 			if (dsa_to_port(ds, i)->bridge_dev != bridge)
 				continue;
-			if (priv->ports[i].enable) {
-				sw_w32_mask(1 << port, 0, RTL838X_PORT_ISO_CTRL(i));
-			}
+			if (priv->ports[i].enable)
+				priv->r->mask_port_iso_ctrl(1 << port, 0, i);
 			priv->ports[i].pm |= 1 << port;
 
 			port_bitmap &= ~(1 << i);
@@ -1202,7 +1381,7 @@ static void rtl838x_port_bridge_leave (struct dsa_switch *ds, int port,
 
 	/* Add all other ports to this port matrix. */
 	if (priv->ports[port].enable) {
-		sw_w32_mask(0, port_bitmap, RTL838X_PORT_ISO_CTRL(port));
+		priv->r->mask_port_iso_ctrl(0, port_bitmap, port);
 	}
 	priv->ports[port].pm &= ~port_bitmap;
 	mutex_unlock(&priv->reg_mutex);
@@ -1215,10 +1394,10 @@ static int rtl838x_port_bridge_join(struct dsa_switch *ds, int port,
 				      struct net_device *bridge)
 {
 	struct rtl838x_switch_priv *priv = ds->priv;
-	u32 port_bitmap = 1 << CPU_PORT;
+	u64 port_bitmap = 1 << priv->cpu_port;
 	int i;
 
-	printk("port_bridge_join %x: %d %x", (u32)priv, port, port_bitmap);
+	printk("port_bridge_join %x: %d %llx", (u32)priv, port, port_bitmap);
 	mutex_lock(&priv->reg_mutex);
 	for (i = 0; i < ds->num_ports; i++) {
 		/* Add this port to the port matrix of the other ports in the
@@ -1228,9 +1407,8 @@ static int rtl838x_port_bridge_join(struct dsa_switch *ds, int port,
 		if (dsa_is_user_port(ds, i) && i != port) {
 			if (dsa_to_port(ds, i)->bridge_dev != bridge)
 				continue;
-			if (priv->ports[i].enable) {
-				sw_w32_mask(0, 1 << port, RTL838X_PORT_ISO_CTRL(i));
-			}
+			if (priv->ports[i].enable)
+				priv->r->mask_port_iso_ctrl(0, 1 << port, i);
 			priv->ports[i].pm |= 1 << port;
 
 			port_bitmap |= 1 << i;
@@ -1240,8 +1418,8 @@ static int rtl838x_port_bridge_join(struct dsa_switch *ds, int port,
 
 	/* Add all other ports to this port matrix. */
 	if (priv->ports[port].enable) {
-		sw_w32_mask(0, 1 << port, RTL838X_PORT_ISO_CTRL(CPU_PORT));
-		sw_w32_mask(0, port_bitmap, RTL838X_PORT_ISO_CTRL(port));
+		priv->r->mask_port_iso_ctrl(0, 1 << port, priv->cpu_port);
+		priv->r->mask_port_iso_ctrl(0, port_bitmap, port);
 	}
 	priv->ports[port].pm |= port_bitmap;
 	mutex_unlock(&priv->reg_mutex);
@@ -1261,10 +1439,10 @@ static int rtl838x_port_enable(struct dsa_switch *ds, int port,
 		return 0;
 
 	/* add port to switch mask of CPU_PORT */
-	sw_w32_mask(0, 1 << port, RTL838X_PORT_ISO_CTRL(CPU_PORT));
+	priv->r->mask_port_iso_ctrl(0, 1 << port, priv->cpu_port);
 
 	/* add all other ports in the same bridge to switch mask of port */
-	sw_w32_mask(0, priv->ports[port].pm, RTL838X_PORT_ISO_CTRL(port));
+	priv->r->mask_port_iso_ctrl(0, priv->ports[port].pm, port);
 
 	/* enable PHY polling */
 	sw_w32_mask(0, 1 << port, RTL838X_SMI_POLL_CTRL);
@@ -1282,10 +1460,10 @@ static void rtl838x_port_disable(struct dsa_switch *ds, int port)
 		return;
 
 	/* remove port from switch mask of CPU_PORT */
-	sw_w32_mask(1 << port, 0, RTL838X_PORT_ISO_CTRL(CPU_PORT));
+	priv->r->mask_port_iso_ctrl(1 << port, 0, priv->cpu_port);
 
 	/* remove all other ports in the same bridge from switch mask of port */
-	sw_w32_mask(priv->ports[port].pm, 0, RTL838X_PORT_ISO_CTRL(port));
+	priv->r->mask_port_iso_ctrl(priv->ports[port].pm, 0, port);
 
 	priv->ports[port].enable = false;
 
@@ -1353,21 +1531,21 @@ static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
 				      unsigned int mode,
 				      const struct phylink_link_state *state)
 {
-	// struct rtl838x_eth_priv *priv = ds->priv;
+	struct rtl838x_switch_priv *priv = ds->priv;
 	u32 reg;
 
 	printk("rtl838x_phylink_mac_config port %d, mode %x\n", port, mode);
 	
-	if (port == CPU_PORT) {
+	if (port == priv->cpu_port) {
 		/* Set Speed, duplex, flow control
 		* FORCE_EN | LINK_EN | NWAY_EN | DUP_SEL 
 		* | SPD_SEL = 0b10 | FORCE_FC_EN | PHY_MASTER_SLV_MANUAL_EN 
 		* | MEDIA_SEL
 		*/
-		sw_w32(0x6192F, RTL838X_MAC_FORCE_MODE_CTRL(CPU_PORT));
+		sw_w32(0x6192F, RTL838X_MAC_FORCE_MODE_CTRL(priv->cpu_port));
 
 		/* allow CRC errors on CPU-port */
-		sw_w32_mask(0, 0x8, RTL838X_MAC_PORT_CTRL(CPU_PORT));
+		sw_w32_mask(0, 0x8, RTL838X_MAC_PORT_CTRL(priv->cpu_port));
 		return;
 	}
 
@@ -1491,9 +1669,10 @@ static void rtl838x_phylink_validate(struct dsa_switch *ds, int port,
 static int rtl838x_phylink_mac_link_state(struct dsa_switch *ds, int port,
 					  struct phylink_link_state *state)
 {
+	struct rtl838x_switch_priv *priv = ds->priv;
 	u32 speed;
 
-	if (port < 0 || port > CPU_PORT)
+	if (port < 0 || port > priv->cpu_port)
 		return -EINVAL;
 	
 	state->link = 0;
@@ -1682,8 +1861,18 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 	priv->ds->ops = &rtl838x_switch_ops;
 	priv->dev = dev;
 	priv->ds->num_ports = 30;
-	
-	rtl8380_get_version(priv);
+
+	priv->family_id = soc_info.family;
+	priv->id = soc_info.id;
+	if(soc_info.family == RTL8380_FAMILY_ID) {
+		priv->cpu_port = RTL838X_CPU_PORT;
+		priv->r = &rtl838x_reg;
+		rtl8380_get_version(priv);
+	} else {
+		priv->cpu_port = RTL839X_CPU_PORT;
+		priv->r = &rtl839x_reg;
+		rtl8390_get_version(priv);
+	}
 	printk("Chip version %c\n", priv->version);
 
 	err = rtl838x_mdio_probe(priv);
@@ -1713,7 +1902,7 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 
 	printk("RESETTING L2 settings\n");
 	sw_w32_mask(0, 1 << 8, RTL838X_RST_GLB_CTRL_0);
-	rtl838x_get_l2aging();
+	rtl838x_get_l2aging(priv);
 
 	/* Clear all destination ports for mirror groups */
 	for (i=0; i< 4; i++)

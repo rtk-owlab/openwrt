@@ -133,6 +133,10 @@ void __init prom_init(void)
 			soc_info.name="RTL8328";
 			soc_info.family = RTL8328_FAMILY_ID;
 			break;
+		case 0x8332:
+			soc_info.name="RTL8332";
+			soc_info.family = RTL8380_FAMILY_ID;
+			break;
 		case 0x8380:
 			soc_info.name="RTL8380";
 			soc_info.family = RTL8380_FAMILY_ID;
@@ -159,6 +163,7 @@ void __init prom_init(void)
 			break;
 		default:
 			soc_info.name="DEFAULT";
+			soc_info.family = 0;
 	}
 	pr_info("SoC Type: %s\n", get_system_type());
 	prom_init_cmdline();

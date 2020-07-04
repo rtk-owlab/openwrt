@@ -716,6 +716,7 @@ static int rtl838x_gpio_probe(struct platform_device *pdev)
 	u8 indirect_bus_id;
 
 	printk("Probing RTL838X GPIOs\n");
+
 	if (!np) {
 		dev_err(&pdev->dev, "No DT found\n");
 		return -EINVAL;

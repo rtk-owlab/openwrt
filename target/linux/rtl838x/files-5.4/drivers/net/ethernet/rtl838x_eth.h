@@ -3,7 +3,7 @@
 #ifndef _RTL838X_ETH_H
 #define _RTL838X_ETH_H
 
-#define RTL838X_SW_BASE ((void __iomem *)0xBB000000)
+#define RTL838X_SW_BASE ((volatile void __iomem *)0xBB000000)
 
 #define sw_r32(reg)	__raw_readl(reg)
 #define sw_w32(val, reg)	__raw_writel(val, reg)
@@ -79,12 +79,20 @@
 
 /* MAC handling */
 #define RTL838X_MAC_LINK_STS			(RTL838X_SW_BASE + 0xa188)
-#define RTL838X_MAC_LINK_SPD_STS(port)		(RTL838X_SW_BASE + 0xa190 + (((port >> 4) << 2)))
+#define RTL839X_MAC_LINK_STS			(RTL838X_SW_BASE + 0x0390)
+#define RTL838X_MAC_LINK_SPD_STS		(RTL838X_SW_BASE + 0xa190)
+#define RTL839X_MAC_LINK_SPD_STS		(RTL838X_SW_BASE + 0x03a0)
 #define RTL838X_MAC_LINK_DUP_STS		(RTL838X_SW_BASE + 0xa19c)
+#define RTL839X_MAC_LINK_DUP_STS		(RTL838X_SW_BASE + 0x03b0)
+// TODO: RTL8390_MAC_LINK_MEDIA_STS_ADDR ???
 #define RTL838X_MAC_TX_PAUSE_STS		(RTL838X_SW_BASE + 0xa1a0)
+#define RTL839X_MAC_TX_PAUSE_STS		(RTL838X_SW_BASE + 0x03b8)
 #define RTL838X_MAC_RX_PAUSE_STS		(RTL838X_SW_BASE + 0xa1a4)
+#define RTL839X_MAC_RX_PAUSE_STS		(RTL838X_SW_BASE + 0x03c0)
 #define RTL838X_EEE_TX_TIMER_GIGA_CTRL		(RTL838X_SW_BASE + 0xaa04)
 #define RTL838X_EEE_TX_TIMER_GELITE_CTRL	(RTL838X_SW_BASE + 0xaa08)
+#define RTL839X_MAC_GLB_CTRL			(RTL838X_SW_BASE + 0x02a8)
+#define RTL839X_SCHED_LB_TICK_TKN_CTRL		(RTL838X_SW_BASE + 0x60f8)
 
 /* MAC link state bits */
 #define FORCE_EN				(1 << 0)
@@ -94,97 +102,158 @@
 #define TX_PAUSE_EN				(1 << 6)
 #define RX_PAUSE_EN				(1 << 7)
 
-inline void __iomem *rtl838x_mac_port_ctrl(int p)
+inline volatile void __iomem *rtl838x_mac_port_ctrl(int p)
 {
 	return RTL838X_MAC_PORT_CTRL + (p << 7);
 }
 
-inline void __iomem *rtl839x_mac_port_ctrl(int p)
+inline volatile void __iomem *rtl839x_mac_port_ctrl(int p)
 {
 	return RTL839X_MAC_PORT_CTRL + (p << 7);
 }
 
-inline void __iomem *rtl838x_mac_force_mode_ctrl(int p)
+inline volatile void __iomem *rtl838x_mac_force_mode_ctrl(int p)
 {
 	return RTL838X_MAC_FORCE_MODE_CTRL + (p << 2);
 }
 
-inline void __iomem *rtl839x_mac_force_mode_ctrl(int p)
+inline volatile void __iomem *rtl839x_mac_force_mode_ctrl(int p)
 {
 	return RTL839X_MAC_FORCE_MODE_CTRL + (p << 2);
 }
 
-inline void __iomem *rtl838x_dma_rx_base(int i)
+inline volatile void __iomem *rtl838x_dma_rx_base(int i)
 {
 	return RTL838X_DMA_RX_BASE + (i << 2);
 }
 
-inline void __iomem *rtl839x_dma_rx_base(int i)
+inline volatile void __iomem *rtl839x_dma_rx_base(int i)
 {
 	return RTL839X_DMA_RX_BASE + (i << 2);
 }
 
-inline void __iomem *rtl838x_dma_tx_base(int i)
+inline volatile void __iomem *rtl838x_dma_tx_base(int i)
 {
 	return RTL838X_DMA_TX_BASE + (i << 2);
 }
 
-inline void __iomem *rtl839x_dma_tx_base(int i)
+inline volatile void __iomem *rtl839x_dma_tx_base(int i)
 {
 	return RTL839X_DMA_TX_BASE + (i << 2);
 }
 
-inline void __iomem *rtl838x_dma_if_rx_ring_size(int i)
+inline volatile void __iomem *rtl838x_dma_if_rx_ring_size(int i)
 {
 	return RTL838X_DMA_IF_RX_RING_SIZE + ((i >> 3) << 2);
 }
 
-inline void __iomem *rtl839x_dma_if_rx_ring_size(int i)
+inline volatile void __iomem *rtl839x_dma_if_rx_ring_size(int i)
 {
 	return RTL839X_DMA_IF_RX_RING_SIZE + ((i >> 3) << 2);
 }
 
-inline void __iomem *rtl838x_dma_if_rx_ring_cntr(int i)
+inline volatile void __iomem *rtl838x_dma_if_rx_ring_cntr(int i)
 {
 	return RTL838X_DMA_IF_RX_RING_CNTR + ((i >> 3) << 2);
 }
 
-inline void __iomem *rtl839x_dma_if_rx_ring_cntr(int i)
+inline volatile void __iomem *rtl839x_dma_if_rx_ring_cntr(int i)
 {
 	return RTL839X_DMA_IF_RX_RING_CNTR + ((i >> 3) << 2);
 }
 
 
-inline void __iomem *rtl838x_dma_if_rx_cur(int i)
+inline volatile void __iomem *rtl838x_dma_if_rx_cur(int i)
 {
 	return RTL838X_DMA_IF_RX_CUR + (i << 2);
 }
 
-inline void __iomem *rtl839x_dma_if_rx_cur(int i)
+inline volatile void __iomem *rtl839x_dma_if_rx_cur(int i)
 {
 	return RTL839X_DMA_IF_RX_CUR + (i << 2);
 }
 
-struct t_test {
-	int a;
-	char b;
-};
+inline u32 rtl838x_get_mac_link_sts(int port)
+{
+	return (sw_r32(RTL838X_MAC_LINK_STS) & (1 << port));
+}
+
+inline u32 rtl839x_get_mac_link_sts(int p)
+{
+	return (sw_r32(RTL839X_MAC_LINK_STS + ((p >> 5) << 2)) & (1 << p));
+}
+
+inline u32 rtl838x_get_mac_link_dup_sts(int port)
+{
+	return (sw_r32(RTL838X_MAC_LINK_DUP_STS) & (1 << port));
+}
+
+inline u32 rtl839x_get_mac_link_dup_sts(int p)
+{
+	return (sw_r32(RTL839X_MAC_LINK_DUP_STS + ((p >> 5) << 2)) & (1 << p));
+}
+
+inline u32 rtl838x_get_mac_link_spd_sts(int port)
+{
+	volatile void __iomem *r = RTL838X_MAC_LINK_SPD_STS + ((port >> 4) << 2);
+	u32 speed = sw_r32(r);
+	speed >>= (port % 16) << 1;
+	return (speed & 0x3);
+}
+
+inline u32 rtl839x_get_mac_link_spd_sts(int port)
+{
+	volatile void __iomem *r = RTL839X_MAC_LINK_SPD_STS + ((port >> 4) << 2);
+	u32 speed = sw_r32(r);
+	speed >>= (port % 16) << 1;
+	return (speed & 0x3);
+}
+
+inline u32 rtl838x_get_mac_rx_pause_sts(int port)
+{
+	return (sw_r32(RTL838X_MAC_RX_PAUSE_STS) & (1 << port));
+}
+
+inline u32 rtl839x_get_mac_rx_pause_sts(int p)
+{
+	return (sw_r32(RTL839X_MAC_RX_PAUSE_STS + ((p >> 5) << 2)) & (1 << p));
+}
+
+inline u32 rtl838x_get_mac_tx_pause_sts(int port)
+{
+	return (sw_r32(RTL838X_MAC_TX_PAUSE_STS) & (1 << port));
+}
+
+inline u32 rtl839x_get_mac_tx_pause_sts(int p)
+{
+	return (sw_r32(RTL839X_MAC_TX_PAUSE_STS + ((p >> 5) << 2)) & (1 << p));
+}
+
 
 struct rtl838x_reg {
-	void __iomem *(*mac_port_ctrl)(int);
-	void __iomem *dma_if_intr_sts;
-	void __iomem *dma_if_intr_msk;
-	void __iomem *dma_if_ctrl;
-	void __iomem * (*mac_force_mode_ctrl)(int);
-	void __iomem * (*dma_rx_base)(int);
-	void __iomem * (*dma_tx_base)(int);
-	void __iomem * (*dma_if_rx_ring_size)(int);
-	void __iomem * (*dma_if_rx_ring_cntr)(int);
-	void __iomem * (*dma_if_rx_cur)(int);
+	volatile void __iomem *(*mac_port_ctrl)(int);
+	volatile void __iomem *dma_if_intr_sts;
+	volatile void __iomem *dma_if_intr_msk;
+	volatile void __iomem *dma_if_ctrl;
+	volatile void __iomem * (*mac_force_mode_ctrl)(int);
+	volatile void __iomem * (*dma_rx_base)(int);
+	volatile void __iomem * (*dma_tx_base)(int);
+	volatile void __iomem * (*dma_if_rx_ring_size)(int);
+	volatile void __iomem * (*dma_if_rx_ring_cntr)(int);
+	volatile void __iomem * (*dma_if_rx_cur)(int);
+	volatile void __iomem *rst_gbl_ctrl;
+	u32 (*get_mac_link_sts)(int);
+	u32 (*get_mac_link_dup_sts)(int);
+	u32 (*get_mac_link_spd_sts)(int);
+	u32 (*get_mac_rx_pause_sts)(int);
+	u32 (*get_mac_tx_pause_sts)(int);
+	volatile void __iomem *mac;
 };
 
 int rtl838x_write_phy(u32 port, u32 page, u32 reg, u32 val);
 int rtl838x_read_phy(u32 port, u32 page, u32 reg, u32 *val);
+int rtl839x_write_phy(u32 port, u32 page, u32 reg, u32 val);
+int rtl839x_read_phy(u32 port, u32 page, u32 reg, u32 *val);
 
 
 #endif /* _RTL838X_ETH_H */

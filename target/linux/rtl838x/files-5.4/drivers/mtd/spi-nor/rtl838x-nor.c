@@ -568,7 +568,6 @@ static int rtl838x_nor_drv_probe(struct platform_device *pdev)
 	int addrMode;
 
 	pr_info("Initializing rtl838x_nor_driver\n");
-	rtl8390_test();
 	if (!pdev->dev.of_node) {
 		dev_err(&pdev->dev, "No DT found\n");
 		return -EINVAL;
@@ -606,8 +605,6 @@ static int rtl838x_nor_drv_probe(struct platform_device *pdev)
 	ret = rtl838x_nor_init(rtl838x_nor, flash_np);
 
 nor_free:
-	
-	printk("Last\n"); rtl8390_test();
 	return ret;
 }
 

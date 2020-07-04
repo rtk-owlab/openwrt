@@ -40,8 +40,8 @@ u32 pll_reset_value;
 static void rtl838x_restart(char *command)
 {
 	u32 pll = rtl838x_r32(RTL838X_PLL_CML_CTRL);
-	pr_info("Family id: %x\n", soc_info.family);
 
+	pr_info("System restart.\n");
 	if (soc_info.family == RTL8390_FAMILY_ID)
 		rtl838x_w32(0xFFFFFFFF, RTL839X_RST_GLB_CTRL);
 
@@ -51,8 +51,7 @@ static void rtl838x_restart(char *command)
 	rtl838x_w32(pll_reset_value, RTL838X_PLL_CML_CTRL);
 	rtl838x_w32(0, RTL838X_INT_RW_CTRL);
 
-	printk("System restart.\n");
-
+	pr_info("Resetting RTL838X SoC\n");
 	/* Reset Global Control1 Register */
 	rtl838x_w32(1, RTL838X_RST_GLB_CTRL_1);
 }
