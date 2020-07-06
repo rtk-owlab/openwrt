@@ -88,7 +88,7 @@ static const struct rtl838x_reg rtl838x_reg = {
 	.dma_if_rx_ring_size = rtl838x_dma_if_rx_ring_size,
 	.dma_if_rx_ring_cntr = rtl838x_dma_if_rx_ring_cntr,
 	.dma_if_rx_cur = rtl838x_dma_if_rx_cur,
-	.rst_gbl_ctrl = RTL838X_RST_GLB_CTRL_0,
+	.rst_glb_ctrl = RTL838X_RST_GLB_CTRL_0,
 	.get_mac_link_sts = rtl838x_get_mac_link_sts,
 	.get_mac_link_dup_sts = rtl838x_get_mac_link_dup_sts,
 	.get_mac_link_spd_sts = rtl838x_get_mac_link_spd_sts,
@@ -108,7 +108,7 @@ static const struct rtl838x_reg rtl839x_reg = {
 	.dma_if_rx_ring_size = rtl839x_dma_if_rx_ring_size,
 	.dma_if_rx_ring_cntr = rtl839x_dma_if_rx_ring_cntr,
 	.dma_if_rx_cur = rtl839x_dma_if_rx_cur,
-	.rst_gbl_ctrl = RTL839X_RST_GLB_CTRL,
+	.rst_glb_ctrl = RTL839X_RST_GLB_CTRL,
 	.get_mac_link_sts = rtl839x_get_mac_link_sts,
 	.get_mac_link_dup_sts = rtl839x_get_mac_link_dup_sts,
 	.get_mac_link_spd_sts = rtl839x_get_mac_link_spd_sts,
@@ -198,12 +198,12 @@ static void rtl838x_hw_reset(struct rtl838x_eth_priv *priv)
 	mdelay(500);
 
 	/* Reset NIC */
-	sw_w32(0x08, priv->r->rst_gbl_ctrl);
+	sw_w32(0x08, priv->r->rst_glb_ctrl);
 	mdelay(200);
 
 	do {
 		udelay(20);
-	} while (sw_r32(priv->r->rst_gbl_ctrl));
+	} while (sw_r32(priv->r->rst_glb_ctrl) & 0x08);
 	mdelay(100);
 
 	/* Restart TX/RX to CPU port */
@@ -1032,6 +1032,7 @@ err_put_node:
 
 static int rtl838x_mdio_remove(struct rtl838x_eth_priv *priv)
 {
+	printk("rtl838x_mdio_remove called\n");
 	if (!priv->mii_bus)
 		return 0;
 

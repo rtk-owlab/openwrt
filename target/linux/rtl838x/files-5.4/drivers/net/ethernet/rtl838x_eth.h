@@ -241,7 +241,7 @@ struct rtl838x_reg {
 	volatile void __iomem * (*dma_if_rx_ring_size)(int);
 	volatile void __iomem * (*dma_if_rx_ring_cntr)(int);
 	volatile void __iomem * (*dma_if_rx_cur)(int);
-	volatile void __iomem *rst_gbl_ctrl;
+	volatile void __iomem *rst_glb_ctrl;
 	u32 (*get_mac_link_sts)(int);
 	u32 (*get_mac_link_dup_sts)(int);
 	u32 (*get_mac_link_spd_sts)(int);
