@@ -127,7 +127,7 @@
 			compatible = "ethernet-phy-ieee802.3-c22";
 		};
 
-		/* Internal phy RTL8218B */
+		/* External phy RTL8218B */
 		phy8: ethernet-phy@8 {
 			reg = <8>;
 			compatible = "ethernet-phy-ieee802.3-c22";
@@ -160,30 +160,56 @@
 			reg = <15>;
 			compatible = "ethernet-phy-ieee802.3-c22";
 		};
-		
-		/* External phy: RTL8214FC */
+
+		/* External phy RTL8218B */
+		phy16: ethernet-phy@16 {
+			reg = <16>;
+			compatible = "ethernet-phy-ieee802.3-c22";
+		};
+		phy17: ethernet-phy@17 {
+			reg = <17>;
+			compatible = "ethernet-phy-ieee802.3-c22";
+		};
+		phy18: ethernet-phy@18 {
+			reg = <18>;
+			compatible = "ethernet-phy-ieee802.3-c22";
+		};
+		phy19: ethernet-phy@19 {
+			reg = <19>;
+			compatible = "ethernet-phy-ieee802.3-c22";
+		};
+		phy20: ethernet-phy@20 {
+			reg = <20>;
+			compatible = "ethernet-phy-ieee802.3-c22";
+		};
+		phy21: ethernet-phy@21 {
+			reg = <21>;
+			compatible = "ethernet-phy-ieee802.3-c22";
+		};
+		phy22: ethernet-phy@22 {
+			reg = <22>;
+			compatible = "ethernet-phy-ieee802.3-c22";
+		};
+		phy23: ethernet-phy@23 {
+			reg = <23>;
+			compatible = "ethernet-phy-ieee802.3-c22";
+		};
+
+		/* External unknown phy */
 		phy24: ethernet-phy@24 {
 			compatible = "ethernet-phy-ieee802.3-c22";
-			sfp;
-			media = "fibre";
 			reg = <24>;
 		};
 		phy25: ethernet-phy@25 {
 			compatible = "ethernet-phy-ieee802.3-c22";
-			sfp;
-			media = "fibre";
 			reg = <25>;
 		};
 		phy26: ethernet-phy@26 {
 			compatible = "ethernet-phy-ieee802.3-c22";
-			sfp;
-			media = "fibre";
 			reg = <26>;
 		};
 		phy27: ethernet-phy@27 {
 			compatible = "ethernet-phy-ieee802.3-c22";
-			sfp;
-			media = "fibre";
 			reg = <27>;
 		};
 	};
@@ -291,34 +317,81 @@
 			phy-handle = <&phy15>;
 			phy-mode = "internal";
 		};
-
+		port@16 {
+			reg = <16>;
+			label = "lan17";
+			phy-handle = <&phy16>;
+			phy-mode = "internal";
+		};
+		port@17 {
+			reg = <17>;
+			label = "lan18";
+			phy-handle = <&phy17>;
+			phy-mode = "internal";
+		};
+		port@18 {
+			reg = <18>;
+			label = "lan19";
+			phy-handle = <&phy18>;
+			phy-mode = "internal";
+		};
+		port@19 {
+			reg = <19>;
+			label = "lan20";
+			phy-handle = <&phy19>;
+			phy-mode = "internal";
+		};
+		port@20 {
+			reg = <20>;
+			label = "lan21";
+			phy-handle = <&phy20>;
+			phy-mode = "internal";
+		};
+		port@21 {
+			reg = <21>;
+			label = "lan22";
+			phy-handle = <&phy21>;
+			phy-mode = "internal";
+		};
+		port@22 {
+			reg = <22>;
+			label = "lan23";
+			phy-handle = <&phy22>;
+			phy-mode = "internal";
+		};
+		port@23 {
+			reg = <23>;
+			label = "lan24";
+			phy-handle = <&phy23>;
+			phy-mode = "internal";
+		};
 		port@24 {
 			reg = <24>;
-			label = "lan17";
+			label = "lan25";
 			phy-handle = <&phy24>;
 			phy-mode = "qsgmii";
 		};
 		port@25 {
 			reg = <25>;
-			label = "lan18";
+			label = "lan26";
 			phy-handle = <&phy25>;
 			phy-mode = "qsgmii";
 		};
 		port@26 {
 			reg = <26>;
-			label = "lan19";
+			label = "lan27";
 			phy-handle = <&phy26>;
 			phy-mode = "qsgmii";
 		};
 		port@27 {
 			reg = <27>;
-			label = "lan20";
+			label = "lan28";
 			phy-handle = <&phy27>;
 			phy-mode = "qsgmii";
 		};
-		port@28 {
+		port@52 {
 			ethernet = <&ethernet0>;
-			reg = <28>;
+			reg = <52>;
 			phy-mode = "internal";
 			fixed-link {
 				speed = <1000>;
