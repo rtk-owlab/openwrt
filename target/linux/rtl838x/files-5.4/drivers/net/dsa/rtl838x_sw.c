@@ -367,6 +367,31 @@ static irqreturn_t rtl838x_switch_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t rtl839x_switch_irq(int irq, void *dev_id)
+{
+	struct dsa_switch *ds = dev_id;
+//	struct rtl838x_switch_priv *priv = ds->priv;
+	u32 status = sw_r32(RTL839X_ISR_GLB_SRC);
+	u64 ports = sw_r64(RTL839X_ISR_PORT_LINK_STS_CHG);
+	u64 link;
+	int i;
+
+	/* Clear status */
+	sw_w64(ports, RTL839X_ISR_PORT_LINK_STS_CHG);
+	pr_info("Link change: status: %x, ports %llx\n", status, ports);
+
+	for (i = 0; i < 52; i++) {
+		if (ports & (1 << i)) {
+			link = sw_r64(RTL839X_MAC_LINK_STS);
+			if (link & (1 << i))
+				dsa_port_phylink_mac_change(ds, i, true);
+			else
+				dsa_port_phylink_mac_change(ds, i, false);
+		}
+	}
+	return IRQ_HANDLED;
+}
+
 int rtl8380_sds_power(int mac, int val)
 {
 	u32 mode = (val == 1)? 0x4: 0x9;
@@ -1697,10 +1722,13 @@ static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
 		* | SPD_SEL = 0b10 | FORCE_FC_EN | PHY_MASTER_SLV_MANUAL_EN 
 		* | MEDIA_SEL
 		*/
-		sw_w32(0x6192F, priv->r->mac_force_mode_ctrl(priv->cpu_port));
-
-		/* allow CRC errors on CPU-port */
-		sw_w32_mask(0, 0x8, RTL838X_MAC_PORT_CTRL(priv->cpu_port));
+		if (priv->family_id == RTL8380_FAMILY_ID) {
+			sw_w32(0x6192F, priv->r->mac_force_mode_ctrl(priv->cpu_port));
+			/* allow CRC errors on CPU-port */
+			sw_w32_mask(0, 0x8, RTL838X_MAC_PORT_CTRL(priv->cpu_port));
+		} else {
+			sw_w32_mask(0, 3, priv->r->mac_force_mode_ctrl(priv->cpu_port));
+		}
 		return;
 	}
 
@@ -2052,8 +2080,13 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 	sw_w32(0x1, priv->r->imr_glb);
 
 	priv->link_state_irq = 20;
-	err = request_irq(priv->link_state_irq, rtl838x_switch_irq,
-			  IRQF_SHARED, "rtl8838x-link-state", priv->ds);
+	if (priv->family_id == RTL8380_FAMILY_ID) {
+		err = request_irq(priv->link_state_irq, rtl838x_switch_irq,
+				IRQF_SHARED, "rtl8838x-link-state", priv->ds);
+	} else {
+		err = request_irq(priv->link_state_irq, rtl839x_switch_irq,
+				IRQF_SHARED, "rtl8838x-link-state", priv->ds);
+	}
 	if (err) {
 		dev_err(dev, "Error setting up switch interrupt.\n");
 		/* Need to free allocated switch here */

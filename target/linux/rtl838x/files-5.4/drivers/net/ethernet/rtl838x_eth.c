@@ -193,32 +193,46 @@ static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 
 static void rtl838x_hw_reset(struct rtl838x_eth_priv *priv)
 {
+	u32 int_saved;
+
+	printk("RESETTING %x, CPU_PORT %d\n", priv->family_id, priv->cpu_port);
 	/* Stop TX/RX */
 	sw_w32(0x0, priv->r->mac_port_ctrl(priv->cpu_port));
 	mdelay(500);
 
+	int_saved = sw_r32(priv->r->dma_if_intr_msk);
 	/* Reset NIC */
 	sw_w32(0x08, priv->r->rst_glb_ctrl);
-	mdelay(200);
-
 	do {
 		udelay(20);
 	} while (sw_r32(priv->r->rst_glb_ctrl) & 0x08);
 	mdelay(100);
 
+	/* Restore notification settings: on RTL838x these bits are null */
+	sw_w32_mask(7 << 20, int_saved & (7 << 20), priv->r->dma_if_intr_msk);
+
 	/* Restart TX/RX to CPU port */
 	sw_w32(0x03, priv->r->mac_port_ctrl(priv->cpu_port));
-	
-	/* Set Speed, duplex, flow control
-	 * FORCE_EN | LINK_EN | NWAY_EN | DUP_SEL 
-	 * | SPD_SEL = 0b10 | FORCE_FC_EN | PHY_MASTER_SLV_MANUAL_EN 
-	 * | MEDIA_SEL
-	 */
-	sw_w32(0x6192F, priv->r->mac_force_mode_ctrl(priv->cpu_port));
 
-	/* allow CRC errors on CPU-port */
-	sw_w32_mask(0, 0x8, priv->r->mac_port_ctrl(priv->cpu_port));
-	
+	if (priv->family_id == RTL8380_FAMILY_ID) {
+		/* Set Speed, duplex, flow control
+		* FORCE_EN | LINK_EN | NWAY_EN | DUP_SEL
+		* | SPD_SEL = 0b10 | FORCE_FC_EN | PHY_MASTER_SLV_MANUAL_EN
+		* | MEDIA_SEL
+		*/
+		sw_w32(0x6192F, priv->r->mac_force_mode_ctrl(priv->cpu_port));
+		/* allow CRC errors on CPU-port */
+		sw_w32_mask(0, 0x8, priv->r->mac_port_ctrl(priv->cpu_port));
+	} else {
+		/* CPU port joins Lookup Miss Flooding Portmask */
+		sw_w32(0x28000, RTL839X_TBL_ACCESS_L2_CTRL);
+		sw_w32_mask(0, 0x80000000, RTL839X_TBL_ACCESS_L2_DATA(0));
+		sw_w32(0x38000, RTL839X_TBL_ACCESS_L2_CTRL);
+
+		/* Force CPU port link up */
+		sw_w32_mask(0, 3, priv->r->mac_force_mode_ctrl(priv->cpu_port));
+	}
+
 	/* Disable and clear interrupts */
 	sw_w32(0x00000000, priv->r->dma_if_intr_msk);
 	sw_w32(0xffffffff, priv->r->dma_if_intr_sts);
