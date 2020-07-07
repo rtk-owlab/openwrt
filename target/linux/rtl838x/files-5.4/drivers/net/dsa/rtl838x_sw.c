@@ -56,6 +56,19 @@ inline void rtl839x_set_port_reg(u64 set, volatile void __iomem *reg)
 	sw_w32(set & 0xffffffff, reg + 4);
 }
 
+inline u64 rtl838x_get_port_reg(volatile void __iomem *reg)
+{
+	return ( (u64) sw_r32(reg) );
+}
+
+inline u64 rtl839x_get_port_reg(volatile void __iomem *reg)
+{
+	u64 v = sw_r32(reg);
+	v <<= 32;
+	v |= sw_r32(reg + 4);
+	return v;
+}
+
 inline volatile void __iomem *rtl838x_stat_port_std_mib(int p)
 {
 	return RTL838X_STAT_PORT_STD_MIB + (p << 8);
@@ -92,25 +105,25 @@ inline void rtl839x_set_port_iso_ctrl(u64 set, int port)
 inline void rtl838x_exec_tbl0_cmd(u32 cmd)
 {
 	sw_w32(cmd, RTL838X_TBL_ACCESS_CTRL_0);
-	do { }  while (sw_r32(RTL838X_TBL_ACCESS_CTRL_0) & (1 << 15));
+	do { } while (sw_r32(RTL838X_TBL_ACCESS_CTRL_0) & (1 << 15));
 }
 
 inline void rtl839x_exec_tbl0_cmd(u32 cmd)
 {
 	sw_w32(cmd, RTL839X_TBL_ACCESS_CTRL_0);
-	do { }  while (sw_r32(RTL839X_TBL_ACCESS_CTRL_0) & (1 << 16));
+	do { } while (sw_r32(RTL839X_TBL_ACCESS_CTRL_0) & (1 << 16));
 }
 
 inline void rtl838x_exec_tbl1_cmd(u32 cmd)
 {
 	sw_w32(cmd, RTL838X_TBL_ACCESS_CTRL_1);
-	do { }  while (sw_r32(RTL838X_TBL_ACCESS_CTRL_1) & (1 << 15));
+	do { } while (sw_r32(RTL838X_TBL_ACCESS_CTRL_1) & (1 << 15));
 }
 
 inline void rtl839x_exec_tbl1_cmd(u32 cmd)
 {
 	sw_w32(cmd, RTL839X_TBL_ACCESS_CTRL_1);
-	do { }  while (sw_r32(RTL839X_TBL_ACCESS_CTRL_1) & (1 << 16));
+	do { } while (sw_r32(RTL839X_TBL_ACCESS_CTRL_1) & (1 << 16));
 }
 
 inline volatile void __iomem *rtl838x_tbl_access_data_0(int i)
@@ -216,9 +229,20 @@ static void rtl838x_vlan_set_untagged(u32 vlan, u64 portmask)
 	rtl838x_exec_tbl1_cmd(cmd);
 }
 
+static inline volatile void __iomem *rtl838x_mac_force_mode_ctrl(int p)
+{
+	return RTL838X_MAC_FORCE_MODE_CTRL + (p << 2);
+}
+
+static inline volatile void __iomem *rtl839x_mac_force_mode_ctrl(int p)
+{
+	return RTL839X_MAC_FORCE_MODE_CTRL + (p << 2);
+}
+
 static const struct rtl838x_reg rtl838x_reg = {
 	.mask_port_reg = rtl838x_mask_port_reg,
 	.set_port_reg = rtl838x_set_port_reg,
+	.get_port_reg = rtl838x_get_port_reg,
 	.stat_port_rst = RTL838X_STAT_PORT_RST,
 	.stat_rst = RTL838X_STAT_RST,
 	.stat_port_std_mib = rtl838x_stat_port_std_mib,
@@ -239,11 +263,13 @@ static const struct rtl838x_reg rtl838x_reg = {
 	.vlan_tables_read = rtl838x_vlan_tables_read,
 	.vlan_set_tagged = rtl838x_vlan_set_tagged,
 	.vlan_set_untagged = rtl838x_vlan_set_untagged,
+	.mac_force_mode_ctrl = rtl838x_mac_force_mode_ctrl,
 };
 
 static const struct rtl838x_reg rtl839x_reg = {
 	.mask_port_reg = rtl839x_mask_port_reg,
 	.set_port_reg = rtl839x_set_port_reg,
+	.get_port_reg = rtl839x_get_port_reg,
 	.stat_port_rst = RTL839X_STAT_PORT_RST,
 	.stat_rst = RTL839X_STAT_RST,
 	.stat_port_std_mib = rtl839x_stat_port_std_mib,
@@ -264,6 +290,7 @@ static const struct rtl838x_reg rtl839x_reg = {
 	.vlan_tables_read = rtl839x_vlan_tables_read,
 	.vlan_set_tagged = rtl839x_vlan_set_tagged,
 	.vlan_set_untagged = rtl839x_vlan_set_untagged,
+	.mac_force_mode_ctrl = rtl839x_mac_force_mode_ctrl,
 };
 
 static const struct rtl838x_mib_desc rtl838x_mib[] = {
@@ -1607,11 +1634,11 @@ static int rtl838x_get_mac_eee(struct dsa_switch *ds, int port,
 	struct rtl838x_switch_priv *priv = ds->priv;
 	printk("rtl838x_get_mac_eee, port %d", port);
 	e->supported = SUPPORTED_100baseT_Full | SUPPORTED_1000baseT_Full;
-	if ( sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(port)) & (1 << 9)) {
+	if ( sw_r32(priv->r->mac_force_mode_ctrl(port)) & (1 << 9)) {
 		e->advertised |= ADVERTISED_100baseT_Full;
 	}
 
-	if ( sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(port)) & (1 << 10)) {
+	if ( sw_r32(priv->r->mac_force_mode_ctrl(port)) & (1 << 10)) {
 		e->advertised |= ADVERTISED_1000baseT_Full;
 	}
 	e->eee_enabled = priv->ports[port].eee_enabled;
@@ -1639,14 +1666,14 @@ static int rtl838x_set_mac_eee(struct dsa_switch *ds, int port,
 	}
 	if (e->eee_enabled) {
 		printk("Enabling EEE for MAC %d\n", port);
-		sw_w32_mask(0, 3 << 9, RTL838X_MAC_FORCE_MODE_CTRL(port));
+		sw_w32_mask(0, 3 << 9, priv->r->mac_force_mode_ctrl(port));
 		sw_w32_mask(0, 1 << port, RTL838X_EEE_PORT_TX_EN);
 		sw_w32_mask(0, 1 << port, RTL838X_EEE_PORT_RX_EN);
 		priv->ports[port].eee_enabled = true;
 		e->eee_enabled = true;
 	} else {
 		printk("Disabling EEE for MAC %d\n", port);
-		sw_w32_mask(3 << 9, 0, RTL838X_MAC_FORCE_MODE_CTRL(port));
+		sw_w32_mask(3 << 9, 0, priv->r->mac_force_mode_ctrl(port));
 		sw_w32_mask(1 << port, 0, RTL838X_EEE_PORT_TX_EN);
 		sw_w32_mask(1 << port, 0, RTL838X_EEE_PORT_RX_EN);
 		priv->ports[port].eee_enabled = false;
@@ -1670,18 +1697,18 @@ static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
 		* | SPD_SEL = 0b10 | FORCE_FC_EN | PHY_MASTER_SLV_MANUAL_EN 
 		* | MEDIA_SEL
 		*/
-		sw_w32(0x6192F, RTL838X_MAC_FORCE_MODE_CTRL(priv->cpu_port));
+		sw_w32(0x6192F, priv->r->mac_force_mode_ctrl(priv->cpu_port));
 
 		/* allow CRC errors on CPU-port */
 		sw_w32_mask(0, 0x8, RTL838X_MAC_PORT_CTRL(priv->cpu_port));
 		return;
 	}
 
-	reg = sw_r32(RTL838X_MAC_FORCE_MODE_CTRL(port));
+	reg = sw_r32(priv->r->mac_force_mode_ctrl(port));
 	if (mode == MLO_AN_PHY) {
 		printk("PHY autonegotiates\n");
 		reg |= 1 << 2;
-		sw_w32(reg, RTL838X_MAC_FORCE_MODE_CTRL(port));
+		sw_w32(reg, priv->r->mac_force_mode_ctrl(port));
 		return;
 	}
 
@@ -1718,7 +1745,7 @@ static void rtl838x_phylink_mac_config(struct dsa_switch *ds, int port,
 	
 	// Disable AN
 	reg &= ~(1 << 2);
-	sw_w32(reg, RTL838X_MAC_FORCE_MODE_CTRL(port));
+	sw_w32(reg, priv->r->mac_force_mode_ctrl(port));
 }
 
 static void rtl838x_phylink_mac_link_down(struct dsa_switch *ds, int port,

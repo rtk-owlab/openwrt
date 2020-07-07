@@ -112,12 +112,12 @@ inline volatile void __iomem *rtl839x_mac_port_ctrl(int p)
 	return RTL839X_MAC_PORT_CTRL + (p << 7);
 }
 
-inline volatile void __iomem *rtl838x_mac_force_mode_ctrl(int p)
+static inline volatile void __iomem *rtl838x_mac_force_mode_ctrl(int p)
 {
 	return RTL838X_MAC_FORCE_MODE_CTRL + (p << 2);
 }
 
-inline volatile void __iomem *rtl839x_mac_force_mode_ctrl(int p)
+static inline volatile void __iomem *rtl839x_mac_force_mode_ctrl(int p)
 {
 	return RTL839X_MAC_FORCE_MODE_CTRL + (p << 2);
 }

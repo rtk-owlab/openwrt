@@ -30,7 +30,8 @@
 #define RTL838X_MAC_PORT_CTRL(port)		(RTL838X_SW_BASE + 0xd560 + (((port) << 7)))
 #define RTL839X_MAC_PORT_CTRL(port)		(RTL838X_SW_BASE + 0x8004 + (((port) << 7)))
 #define RTL838X_RST_GLB_CTRL_0			(RTL838X_SW_BASE + 0x3c)
-#define RTL838X_MAC_FORCE_MODE_CTRL(port)	(RTL838X_SW_BASE + 0xa104 + (((port) << 2)))
+#define RTL838X_MAC_FORCE_MODE_CTRL		(RTL838X_SW_BASE + 0xa104)
+#define RTL839X_MAC_FORCE_MODE_CTRL		(RTL838X_SW_BASE + 0x02bc)
 
 #define RTL838X_DMY_REG31			(RTL838X_SW_BASE + 0x3b28)
 #define RTL838X_SDS_MODE_SEL			(RTL838X_SW_BASE + 0x28)
@@ -67,16 +68,16 @@
 #define RTL838X_VLAN_PORT_PB_VLAN(port)		(RTL838X_SW_BASE + 0x3C00 + ((port) << 2))
 #define RTL838X_VLAN_PORT_IGR_FLTR_0		(RTL838X_SW_BASE + 0x3A7C)
 #define RTL838X_VLAN_PORT_IGR_FLTR_1		(RTL838X_SW_BASE + 0x3A7C + 4)
+
+/* Table 0/1 access registers */
 #define RTL838X_TBL_ACCESS_CTRL_0		(RTL838X_SW_BASE + 0x6914)
 #define RTL838X_TBL_ACCESS_DATA_0(idx)		(RTL838X_SW_BASE + 0x6918 + ((idx) << 2))
 #define RTL838X_TBL_ACCESS_CTRL_1		(RTL838X_SW_BASE + 0xA4C8)
 #define RTL838X_TBL_ACCESS_DATA_1(idx)		(RTL838X_SW_BASE + 0xA4CC + ((idx) << 2))
-
 #define RTL839X_TBL_ACCESS_CTRL_0		(RTL838X_SW_BASE + 0x1190)
 #define RTL839X_TBL_ACCESS_DATA_0(idx)		(RTL838X_SW_BASE + 0x1194 + ((idx) << 2))
 #define RTL839X_TBL_ACCESS_CTRL_1		(RTL838X_SW_BASE + 0x6b80)
 #define RTL839X_TBL_ACCESS_DATA_1(idx)		(RTL838X_SW_BASE + 0x6b84 + ((idx) << 2))
-
 
 /* MAC handling */
 #define RTL838X_MAC_LINK_STS			(RTL838X_SW_BASE + 0xa188)
@@ -147,6 +148,7 @@ struct rtl838x_switch_priv;
 struct rtl838x_reg {
 	void (*mask_port_reg)(u64 clear, u64 set, volatile void __iomem *reg);
 	void (*set_port_reg)(u64 set, volatile void __iomem *reg);
+	u64 (*get_port_reg)(volatile void __iomem *reg);
 	volatile void __iomem *stat_port_rst;
 	volatile void __iomem *stat_rst;
 	volatile void __iomem *(*stat_port_std_mib)(int p);
@@ -167,6 +169,7 @@ struct rtl838x_reg {
 	void (*vlan_tables_read)(u32 vlan, struct rtl838x_vlan_info *);
 	void (*vlan_set_tagged)(u32 vlan, u64 portmask, u32 conf);
 	void (*vlan_set_untagged)(u32 vlan, u64 portmask);
+	volatile void __iomem * (*mac_force_mode_ctrl)(int);
 };
 
 struct rtl838x_switch_priv {
