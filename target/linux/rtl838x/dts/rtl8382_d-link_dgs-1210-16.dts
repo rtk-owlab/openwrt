@@ -7,13 +7,13 @@
 
 / {
 	compatible = "d-link,dgs-1210-16", "realtek,rtl838x-soc";
-	model = "D-Link DGS-1210-16 Switch";
+	model = "D-Link DGS-1210-16";
 
 	aliases {
-		led-boot = &led_sys;
-		led-failsafe = &led_sys;
-		led-running = &led_sys;
-		led-upgrade = &led_sys;
+		led-boot = &led_power;
+		led-failsafe = &led_power;
+		led-running = &led_power;
+		led-upgrade = &led_power;
 	};	
 
 	chosen {
@@ -23,9 +23,9 @@
 	leds {
 		compatible = "gpio-leds";
 
-		led_sys: sys {
-			label = "dgs-1210-16:green:sys";
-			gpios = <&gpio0 47 GPIO_ACTIVE_LOW>;
+		led_power: power {
+			label = "dgs-1210-16:green:power";
+			gpios = <&gpio0 24 GPIO_ACTIVE_LOW>;
 		};
 	};
 };

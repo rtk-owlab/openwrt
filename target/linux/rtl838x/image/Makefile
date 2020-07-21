@@ -63,7 +63,7 @@ endef
 TARGET_DEVICES += inaba_aml2-17gp
 
 define Device/netgear_gs728tpv2
-  SOC := rtl8393
+  SOC := rtl8391
   IMAGE_SIZE := 13824k
   NETGEAR_KERNEL_MAGIC := 0x174e4742
   KERNEL := kernel-bin | append-dtb | lzma -d20 | netgear-uImage lzma
