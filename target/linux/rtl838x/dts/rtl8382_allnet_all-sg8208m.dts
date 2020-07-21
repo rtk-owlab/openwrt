@@ -34,9 +34,10 @@
 		compatible = "gpio-leds";
 
 		led_sys: sys {
-			label = "gs1900:green:sys";
+			label = "sg8208m:green:sys";
 			gpios = <&gpio0 47 GPIO_ACTIVE_HIGH>;
 		};
+		// GPIO 25: power on/off all port leds
 	};
 };
 
@@ -58,35 +59,31 @@
 
 			partition@0 {
 				label = "u-boot";
-				reg = <0x0 0x40000>;
+				reg = <0x0 0x80000>;
 				read-only;
 			};
-			partition@40000 {
+			partition@80000 {
 				label = "u-boot-env";
-				reg = <0x40000 0x10000>;
+				reg = <0x80000 0x10000>;
 				read-only;
 			};
-			partition@50000 {
+			partition@90000 {
 				label = "u-boot-env2";
-				reg = <0x50000 0x10000>;
+				reg = <0x90000 0x10000>;
 				read-only;
 			};
-			partition@60000 {
+			partition@a0000 {
 				label = "jffs";
-				reg = <0x60000 0x100000>;
+				reg = <0xa0000 0x100000>;
 			};
-			partition@160000 {
+			partition@1a0000 {
 				label = "jffs2";
 				reg = <0x160000 0x100000>;
 			};
-			partition@b260000 {
-				label = "runtime";
-				reg = <0x260000 0x6d0000>;
+			partition@b2a0000 {
+				label = "firmware";
+				reg = <0x2a0000 0x700000>;
 				compatible = "denx,uimage";
-			};
-			partition@930000 {
-				label = "runtime2";
-				reg = <0x930000 0x6d0000>;
 			};
 		};
 	};

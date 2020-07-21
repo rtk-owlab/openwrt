@@ -75,6 +75,12 @@ static void __init rtl838x_setup(void)
 		pr_info("PCI device found\n");
 	else
 		pr_info("NO PCI device found\n");
+
+	/* Setup System LED. Bit 15 (14 for RTL8390) then allows to toggle it */
+	if (soc_info.family == RTL8380_FAMILY_ID)
+		rtl838x_w32_mask(0, 3 << 16, RTL838X_LED_GLB_CTRL);
+	else
+		rtl838x_w32_mask(0, 3 << 15, RTL839X_LED_GLB_CTRL);
 }
 
 void __init plat_mem_setup(void)

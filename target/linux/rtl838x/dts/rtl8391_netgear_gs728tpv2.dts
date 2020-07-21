@@ -48,39 +48,36 @@
 
 			partition@0 {
 				label = "u-boot";
-				reg = <0x00000000 0x80000>;
+				reg = <0x00000000 0xe0000>;
 				read-only;
 			};
-			partition@80000 {
+			partition@e0000 {
 				label = "u-boot-env";
-				reg = <0x00080000 0x40000>;
+				reg = <0x000e0000 0x10000>;
 				read-only;
 			};
-			partition@c0000 {
+			partition@f0000 {
 				label = "u-boot-env2";
-				reg = <0x000c0000 0x40000>;
+				reg = <0x000f0000 0x10000>;
 				read-only;
 			};
-			partition@280000 {
-				label = "firmware";
+			partition@100000 {
+				label = "jffs2_cfg";
+				reg = <0x00100000 0x100000>;
+			};
+			partition@200000 {
+				label = "jffs2_log";
+				reg = <0x00200000 0x100000>;
+			};
+			partition@300000 {
+				label = "rootfs";
 				compatible = "denx,uimage";
-				reg = <0x00100000 0xd80000>;
+				reg = <0x00300000 0xe80000>;
 			};
-			partition@be80000 {
-				label = "kernel2";
-				reg = <0x00e80000 0x180000>;
-			};
-			partition@1000000 {
-				label = "sysinfo";
-				reg = <0x01000000 0x40000>;
-			};
-			partition@1040000 {
-				label = "rootfs2";
-				reg = <0x01040000 0xc00000>;
-			};
-			partition@1c40000 {
-				label = "jffs2";
-				reg = <0x01c40000 0x3c0000>;
+			partition@1180000 {
+				label = "firmware2";
+				compatible = "netgear,uimage";
+				reg = <0x01180000 0xe80000>;
 			};
 		};
 	};

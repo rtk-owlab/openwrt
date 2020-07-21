@@ -30,7 +30,8 @@
 #define RTL838X_MAC_PORT_CTRL(port)		(RTL838X_SW_BASE + 0xd560 + (((port) << 7)))
 #define RTL839X_MAC_PORT_CTRL(port)		(RTL838X_SW_BASE + 0x8004 + (((port) << 7)))
 #define RTL838X_RST_GLB_CTRL_0			(RTL838X_SW_BASE + 0x3c)
-#define RTL838X_MAC_FORCE_MODE_CTRL(port)	(RTL838X_SW_BASE + 0xa104 + (((port) << 2)))
+#define RTL838X_MAC_FORCE_MODE_CTRL		(RTL838X_SW_BASE + 0xa104)
+#define RTL839X_MAC_FORCE_MODE_CTRL		(RTL838X_SW_BASE + 0x02bc)
 
 #define RTL838X_DMY_REG31			(RTL838X_SW_BASE + 0x3b28)
 #define RTL838X_SDS_MODE_SEL			(RTL838X_SW_BASE + 0x28)
@@ -67,13 +68,20 @@
 #define RTL838X_VLAN_PORT_PB_VLAN(port)		(RTL838X_SW_BASE + 0x3C00 + ((port) << 2))
 #define RTL838X_VLAN_PORT_IGR_FLTR_0		(RTL838X_SW_BASE + 0x3A7C)
 #define RTL838X_VLAN_PORT_IGR_FLTR_1		(RTL838X_SW_BASE + 0x3A7C + 4)
+
+/* Table 0/1 access registers */
 #define RTL838X_TBL_ACCESS_CTRL_0		(RTL838X_SW_BASE + 0x6914)
 #define RTL838X_TBL_ACCESS_DATA_0(idx)		(RTL838X_SW_BASE + 0x6918 + ((idx) << 2))
 #define RTL838X_TBL_ACCESS_CTRL_1		(RTL838X_SW_BASE + 0xA4C8)
 #define RTL838X_TBL_ACCESS_DATA_1(idx)		(RTL838X_SW_BASE + 0xA4CC + ((idx) << 2))
+#define RTL839X_TBL_ACCESS_CTRL_0		(RTL838X_SW_BASE + 0x1190)
+#define RTL839X_TBL_ACCESS_DATA_0(idx)		(RTL838X_SW_BASE + 0x1194 + ((idx) << 2))
+#define RTL839X_TBL_ACCESS_CTRL_1		(RTL838X_SW_BASE + 0x6b80)
+#define RTL839X_TBL_ACCESS_DATA_1(idx)		(RTL838X_SW_BASE + 0x6b84 + ((idx) << 2))
 
 /* MAC handling */
 #define RTL838X_MAC_LINK_STS			(RTL838X_SW_BASE + 0xa188)
+#define RTL839X_MAC_LINK_STS			(RTL838X_SW_BASE + 0x0390)
 #define RTL838X_MAC_LINK_SPD_STS(port)		(RTL838X_SW_BASE + 0xa190 + (((port >> 4) << 2)))
 #define RTL838X_MAC_LINK_DUP_STS		(RTL838X_SW_BASE + 0xa19c)
 #define RTL838X_MAC_TX_PAUSE_STS		(RTL838X_SW_BASE + 0xa1a0)
@@ -103,8 +111,11 @@
 #define RTL838X_L2_PORT_AGING_OUT		(RTL838X_SW_BASE + 0x3358)
 #define RTL839X_L2_PORT_AGING_OUT		(RTL838X_SW_BASE + 0x3b74)
 #define RTL838X_TBL_ACCESS_L2_CTRL		(RTL838X_SW_BASE + 0x6900)
+#define RTL839X_TBL_ACCESS_L2_CTRL		(RTL838X_SW_BASE + 0x1180)
+#define RTL838X_TBL_ACCESS_L2_DATA(idx)		(RTL838X_SW_BASE + 0x6908 + ((idx) << 2))
 #define RTL838X_TBL_ACCESS_L2_DATA(idx)		(RTL838X_SW_BASE + 0x6908 + ((idx) << 2))
 #define RTL838X_L2_TBL_FLUSH_CTRL		(RTL838X_SW_BASE + 0x3370)
+#define RTL839X_L2_TBL_FLUSH_CTRL		(RTL838X_SW_BASE + 0x3ba0)
 
 /* Port Mirroring */
 #define RTL838X_MIR_CTRL(grp)			(RTL838X_SW_BASE + 0x5D00 + (((grp) << 2)))
@@ -127,9 +138,18 @@ struct rtl838x_port {
 	enum phy_type phy;
 };
 
+struct rtl838x_vlan_info {
+	u64 untagged_ports;
+	u64 tagged_ports;
+	u32 vlan_conf;
+};
+
+struct rtl838x_switch_priv;
+
 struct rtl838x_reg {
 	void (*mask_port_reg)(u64 clear, u64 set, volatile void __iomem *reg);
 	void (*set_port_reg)(u64 set, volatile void __iomem *reg);
+	u64 (*get_port_reg)(volatile void __iomem *reg);
 	volatile void __iomem *stat_port_rst;
 	volatile void __iomem *stat_rst;
 	volatile void __iomem *(*stat_port_std_mib)(int p);
@@ -137,8 +157,20 @@ struct rtl838x_reg {
 	void (*set_port_iso_ctrl)(u64 set, int port);
 	volatile void __iomem *l2_ctrl_0;
 	volatile void __iomem *l2_ctrl_1;
-	volatile void __iomem *l2_ctrl_port_aging_out;
+	volatile void __iomem *l2_port_aging_out;
 	volatile void __iomem *smi_poll_ctrl;
+	volatile void __iomem *l2_tbl_flush_ctrl;
+	void (*exec_tbl0_cmd)(u32 cmd);
+	void (*exec_tbl1_cmd)(u32 cmd);
+	volatile void __iomem *(*tbl_access_data_0)(int i);
+	volatile void __iomem *isr_glb_src;
+	volatile void __iomem *isr_port_link_sts_chg;
+	volatile void __iomem *imr_port_link_sts_chg;
+	volatile void __iomem *imr_glb;
+	void (*vlan_tables_read)(u32 vlan, struct rtl838x_vlan_info *);
+	void (*vlan_set_tagged)(u32 vlan, u64 portmask, u32 conf);
+	void (*vlan_set_untagged)(u32 vlan, u64 portmask);
+	volatile void __iomem * (*mac_force_mode_ctrl)(int);
 };
 
 struct rtl838x_switch_priv {

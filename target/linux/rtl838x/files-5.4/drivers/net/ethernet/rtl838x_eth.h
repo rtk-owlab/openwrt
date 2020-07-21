@@ -76,7 +76,8 @@
 #define RTL838X_TBL_ACCESS_DATA_0(idx)		(RTL838X_SW_BASE + 0x6918 + ((idx) << 2))
 #define RTL838X_TBL_ACCESS_CTRL_1		(RTL838X_SW_BASE + 0xA4C8)
 #define RTL838X_TBL_ACCESS_DATA_1(idx)		(RTL838X_SW_BASE + 0xA4CC + ((idx) << 2))
-
+#define RTL839X_TBL_ACCESS_L2_CTRL		(RTL838X_SW_BASE + 0x1180)
+#define RTL839X_TBL_ACCESS_L2_DATA(idx)		(RTL838X_SW_BASE + 0x1184 + ((idx) << 2))
 /* MAC handling */
 #define RTL838X_MAC_LINK_STS			(RTL838X_SW_BASE + 0xa188)
 #define RTL839X_MAC_LINK_STS			(RTL838X_SW_BASE + 0x0390)
@@ -112,12 +113,12 @@ inline volatile void __iomem *rtl839x_mac_port_ctrl(int p)
 	return RTL839X_MAC_PORT_CTRL + (p << 7);
 }
 
-inline volatile void __iomem *rtl838x_mac_force_mode_ctrl(int p)
+static inline volatile void __iomem *rtl838x_mac_force_mode_ctrl(int p)
 {
 	return RTL838X_MAC_FORCE_MODE_CTRL + (p << 2);
 }
 
-inline volatile void __iomem *rtl839x_mac_force_mode_ctrl(int p)
+static inline volatile void __iomem *rtl839x_mac_force_mode_ctrl(int p)
 {
 	return RTL839X_MAC_FORCE_MODE_CTRL + (p << 2);
 }

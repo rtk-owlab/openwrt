@@ -250,7 +250,7 @@ static int rtl8380_configure_ext_rtl8218b(struct phy_device *phydev)
 	int i, l;
 	int mac = phydev->mdio.addr;
 
-	if (mac != 0 && mac != 16) {
+	if (soc_info.family == RTL8380_FAMILY_ID && mac != 0 && mac != 16) {
 		phydev_err(phydev, "External RTL8218B must have PHY-IDs 0 or 16!\n");
 		return -1;
 	}
@@ -258,7 +258,7 @@ static int rtl8380_configure_ext_rtl8218b(struct phy_device *phydev)
 	phy_id = val << 16;
 	read_phy(mac, 0, 3, &val);
 	phy_id |= val;
-	pr_debug("Phy on MAC %d: %x\n", mac, phy_id);
+	pr_info("Phy on MAC %d: %x\n", mac, phy_id);
 
 	/* Read internal PHY ID */
 	write_phy(mac, 31, 27, 0x0002);
@@ -1128,7 +1128,7 @@ static int rtl8218b_int_phy_probe(struct phy_device *phydev)
 
 	/* All base addresses of the PHYs start at multiples of 8 */
 	if(!(addr % 8)) {
-		/* Configuration must be done whil patching still possible */
+		/* Configuration must be done while patching still possible */
 		return rtl8380_configure_int_rtl8218b(phydev);
 	}
 	return 0;
