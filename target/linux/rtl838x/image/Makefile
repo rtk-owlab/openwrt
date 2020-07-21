@@ -26,6 +26,15 @@ define Build/netgear-uImage
 	$(call Build/uImage,$(1) -M $(NETGEAR_KERNEL_MAGIC))
 endef
 
+define Device/allnet_all-sg8208m
+  SOC := rtl8382
+  IMAGE_SIZE := 7168k
+  DEVICE_VENDOR := ALLNET
+  DEVICE_MODEL := ALL-SG8208M
+  DEVICE_PACKAGES := ip-full ip-bridge ethtool tc
+endef
+TARGET_DEVICES += allnet_all-sg8208m
+
 define Device/d-link_dgs-1210-10p
   SOC := rtl8382
   IMAGE_SIZE := 13824k
