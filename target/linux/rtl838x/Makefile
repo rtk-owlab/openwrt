@@ -3,7 +3,7 @@
 #
 # This is free software, licensed under the GNU General Public License v2.
 # See /LICENSE for more information.
-# mkimage -A mips -O linux -T kernel -C gzip -a 0x80000000 -e 0x80000000 -n "NiceTry" -d vmlinux_orig.gz vmlinux.bix
+#
 include $(TOPDIR)/rules.mk
 
 ARCH:=mips
@@ -15,11 +15,11 @@ FEATURES:=ramdisk squashfs
 KERNEL_PATCHVER:=5.4
 
 define Target/Description
-	Build firmware images for Realtek RTL838x  based boards.
+	Build firmware images for Realtek RTL838x based boards.
 endef
 
 include $(INCLUDE_DIR)/target.mk
 
-DEFAULT_PACKAGES += swconfig uboot-envtools
+DEFAULT_PACKAGES += swconfig uboot-envtools ethtool kmod-gpio-button-hotplug
 
 $(eval $(call BuildTarget))
