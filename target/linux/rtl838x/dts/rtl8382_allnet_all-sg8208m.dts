@@ -22,7 +22,7 @@
 
 	keys {
 		compatible = "gpio-keys-polled";
-
+		poll-interval = <20>;
 		reset {
 			label = "reset";
 			gpios = <&gpio0 67 GPIO_ACTIVE_LOW>;

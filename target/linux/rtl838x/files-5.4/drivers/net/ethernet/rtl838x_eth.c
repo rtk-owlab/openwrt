@@ -168,12 +168,8 @@ static irqreturn_t rtl838x_net_irq(int irq, void *dev_id)
 
 	/* RX interrupt */
 	if (status & 0x0ff00) {
-/* 		Flash system LED
-		reg = rtl838x_r32(RTL838X_LED_GLB_CTRL);
-		reg ^= 1 << 15;
-		rtl838x_w32(reg, RTL838X_LED_GLB_CTRL);
-		printk("RECEIVE %x\n", status);
-*/
+		/* printk("RECEIVE %x\n", status); */
+
 		/* Disable RX interrupt */
 		sw_w32_mask(0xff00, 0, priv->r->dma_if_intr_msk);
 		sw_w32(0x0000ff00, priv->r->dma_if_intr_sts);
@@ -255,8 +251,8 @@ static void rtl838x_hw_en_rxtx(struct rtl838x_eth_priv *priv)
 	/* Disable Head of Line features for all RX rings */
 	sw_w32(0xffffffff, priv->r->dma_if_rx_ring_size(0));
 	
-	/* Truncate RX buffer to 0x640 (1600 bytes), pad TX */
-	sw_w32(0x64000020, priv->r->dma_if_ctrl);
+	/* Truncate RX buffer to 0x640 (1600) bytes, pad TX */
+	sw_w32(0x06400020, priv->r->dma_if_ctrl);
 	
 	/* Enable RX done, RX overflow and TX done interrupts */
 	sw_w32(0xfffff, priv->r->dma_if_intr_msk);
@@ -528,7 +524,7 @@ txdone:
 	return ret;
 }
 
-static int rtl838x_hw_receive(struct net_device *dev, int r)
+static int rtl838x_hw_receive(struct net_device *dev, int r, int budget)
 {
 	struct rtl838x_eth_priv *priv = netdev_priv(dev);
 	struct ring_b *ring = priv->membase;
@@ -545,27 +541,25 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 	spin_lock_irqsave(&priv->lock, flags);
 	last = (u32 *)KSEG1ADDR(sw_r32(priv->r->dma_if_rx_cur(r)));
 
-/*
-	printk("RX ring %2x (index %2x): current %x, last: %x\n", r, ring->c_rx[r], (u32) &ring->rx_r[r][ring->c_rx[r]], (u32) last);
-*/
+
+/*	printk("RX ring %2x (index %2x): current %x, last: %x\n",
+		r, ring->c_rx[r], (u32) &ring->rx_r[r][ring->c_rx[r]], (u32) last); */
+
 	if ( &ring->rx_r[r][ring->c_rx[r]] == last ) {
 		spin_unlock_irqrestore(&priv->lock, flags);
 		return 0;
 	}
 	do {
 		if ((ring->rx_r[r][ring->c_rx[r]] & 0x1)) {
-			printk("WARNING: %x, %x, ISR %x\n", r, (uint32_t)priv, sw_r32(priv->r->dma_if_intr_sts));
-
-			for (i = 0; i < RXRINGS; i++) {
-				printk(KERN_CONT "%x ", KSEG1ADDR(sw_r32(priv->r->dma_if_rx_cur(i))));
-			}
-			printk(" ");
-	
-			for (j = 0; j < RXRINGLEN; j++)
-				printk(KERN_CONT "%x ", (u32)&ring->rx_r[r][j]);
-			printk("--\n");
+			netdev_warn(dev, "WARNING Ring contention: ring %x, last %x, current %x, cPTR %x, ISR %x\n", r, (uint32_t)last,
+				    (u32) &ring->rx_r[r][ring->c_rx[r]],
+				    ring->rx_r[r][ring->c_rx[r]],
+				sw_r32(priv->r->dma_if_intr_sts));
 			break;
 		}
+		if (dbg)
+			dbg--;
+
 		h = &ring->rx_header[r][ring->c_rx[r]];
 /*		printk("RX: CPU-Tag: %x %x %x %x %x\n", h->cpu_tag[0], h->cpu_tag[1], h->cpu_tag[2],
 			h->cpu_tag[3],h->cpu_tag[4]);
@@ -631,7 +625,7 @@ static int rtl838x_hw_receive(struct net_device *dev, int r)
 		ring->rx_r[r][ring->c_rx[r]] 
 			= CPHYSADDR(h) | 0x1 | (ring->c_rx[r] == (RXRINGLEN-1)? WRAP : 0x1);
 		ring->c_rx[r] = (ring->c_rx[r] + 1) % RXRINGLEN;
-	} while (&ring->rx_r[r][ring->c_rx[r]] != last);
+	} while (&ring->rx_r[r][ring->c_rx[r]] != last && work_done < budget);
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 	return work_done;
@@ -642,9 +636,9 @@ static int rtl838x_poll_rx(struct napi_struct *napi, int budget)
 	struct rtl838x_eth_priv *priv = container_of(napi, struct rtl838x_eth_priv, napi);
 	int work_done = 0, r = 0;
 
-/*	printk("in rtl838x_poll_rx, budget: %d\n", budget);*/
+	/* printk("in rtl838x_poll_rx, budget: %d\n", budget); */
 	while (work_done < budget && r < RXRINGS) {
-		work_done += rtl838x_hw_receive(priv->netdev, r);
+		work_done += rtl838x_hw_receive(priv->netdev, r, budget - work_done);
 		r++;
 	}
 
