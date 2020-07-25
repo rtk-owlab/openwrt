@@ -142,7 +142,7 @@ static void rtl839x_vlan_tables_read(u32 vlan, struct rtl838x_vlan_info *info)
 	u64 v;
 
 	cmd = 1 << 16 /* Execute cmd */
-		| 1 << 15 /* Read */
+		| 0 << 15 /* Read */
 		| 0 << 12 /* Table type 0b000 */
 		| (vlan & 0xfff);
 	rtl839x_exec_tbl0_cmd(cmd);
@@ -155,7 +155,7 @@ static void rtl839x_vlan_tables_read(u32 vlan, struct rtl838x_vlan_info *info)
 	info->vlan_conf |= sw_r32(RTL838X_TBL_ACCESS_DATA_0(1)) >> 30;
 
 	cmd = 1 << 16 /* Execute cmd */
-		| 1 << 15 /* Read */
+		| 0 << 15 /* Read */
 		| 0 << 12 /* Table type 0b000 */
 		| (vlan & 0xfff);
 	rtl839x_exec_tbl1_cmd(cmd);
@@ -188,7 +188,7 @@ static void rtl838x_vlan_tables_read(u32 vlan, struct rtl838x_vlan_info *info)
 static void rtl839x_vlan_set_tagged(u32 vlan, u64 portmask, u32 conf)
 {
 	u32 cmd = 1 << 16 /* Execute cmd */
-		| 0 << 15 /* Write */
+		| 1 << 15 /* Write */
 		| 0 << 12 /* Table type 0b00 */
 		| (vlan & 0xfff);
 	u64 v = portmask << 11;
@@ -212,7 +212,7 @@ static void rtl838x_vlan_set_tagged(u32 vlan, u64 portmask, u32 conf)
 static void rtl839x_vlan_set_untagged(u32 vlan, u64 portmask)
 {
 	u32 cmd = 1 << 16 /* Execute cmd */
-		| 0 << 15 /* Write */
+		| 1 << 15 /* Write */
 		| 0 << 12 /* Table type 0b00 */
 		| (vlan & 0xfff);
 	sw_w64(portmask << 11, RTL838X_TBL_ACCESS_DATA_1(0));
@@ -337,8 +337,8 @@ static const struct rtl838x_mib_desc rtl838x_mib[] = {
 	MIB_DESC(1, 0x54, "rx_Pkts512to1023Octets"),
 	MIB_DESC(1, 0x50, "tx_Pkts1024to1518Octets"),
 	MIB_DESC(1, 0x4c, "rx_StatsPkts1024to1518Octets"),
-	MIB_DESC(1, 0x48, "tx_Pkts1519tomaxOctets"),
-	MIB_DESC(1, 0x44, "rx_Pkts1519tomaxOctets"),
+	MIB_DESC(1, 0x48, "tx_Pkts1519toMaxOctets"),
+	MIB_DESC(1, 0x44, "rx_Pkts1519toMaxOctets"),
 	MIB_DESC(1, 0x40, "rxMacDiscards")
 };
 
@@ -1245,7 +1245,7 @@ static void rtl838x_port_stp_state_set(struct dsa_switch *ds, int port,
 			| (msti & 0xfff);
 	} else {
 		cmd = 1 << 16 /* Execute cmd */
-			| 1 << 15 /* Read */
+			| 0 << 15 /* Read */
 			| 5 << 12 /* Table type 0b101 */
 			| (msti & 0xfff);
 	}
@@ -1281,7 +1281,7 @@ static void rtl838x_port_stp_state_set(struct dsa_switch *ds, int port,
 			| (msti & 0xfff);
 	} else {
 		cmd = 1 << 16 /* Execute cmd */
-			| 0 << 15 /* Write */
+			| 1 << 15 /* Write */
 			| 5 << 12 /* Table type 0b101 */
 			| (msti & 0xfff);
 	}

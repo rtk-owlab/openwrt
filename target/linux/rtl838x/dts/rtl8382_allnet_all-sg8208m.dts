@@ -83,7 +83,7 @@
 			partition@b2a0000 {
 				label = "firmware";
 				reg = <0x2a0000 0x700000>;
-				compatible = "denx,uimage";
+				compatible = "allnet,uimage";
 			};
 		};
 	};

@@ -557,8 +557,6 @@ static int rtl838x_hw_receive(struct net_device *dev, int r, int budget)
 				sw_r32(priv->r->dma_if_intr_sts));
 			break;
 		}
-		if (dbg)
-			dbg--;
 
 		h = &ring->rx_header[r][ring->c_rx[r]];
 /*		printk("RX: CPU-Tag: %x %x %x %x %x\n", h->cpu_tag[0], h->cpu_tag[1], h->cpu_tag[2],

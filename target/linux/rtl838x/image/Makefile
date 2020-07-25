@@ -26,12 +26,24 @@ define Build/netgear-uImage
 	$(call Build/uImage,$(1) -M $(NETGEAR_KERNEL_MAGIC))
 endef
 
+define Build/custom-uimage
+	mkimage -A $(LINUX_KARCH) \
+		-O linux -T kernel \
+		-C gzip -a $(KERNEL_LOADADDR) $(if $(UIMAGE_MAGIC),-M $(UIMAGE_MAGIC),) \
+		-e $(if $(KERNEL_ENTRY),$(KERNEL_ENTRY),$(KERNEL_LOADADDR)) \
+		-n '$(1)' -d $@ $@.new
+	mv $@.new $@
+endef
+
 define Device/allnet_all-sg8208m
   SOC := rtl8382
   IMAGE_SIZE := 7168k
   DEVICE_VENDOR := ALLNET
   DEVICE_MODEL := ALL-SG8208M
-  DEVICE_PACKAGES := ip-full ip-bridge ethtool tc
+  UIMAGE_MAGIC := 0x00000006
+  KERNEL := kernel-bin | append-dtb | gzip | custom-uimage 2.2.2.0
+  KERNEL_INITRAMFS := kernel-bin | append-dtb | gzip | custom-uimage 2.2.2.0
+  DEVICE_PACKAGES := ip-full ip-bridge kmod-gpio-button-hotplug tc
 endef
 TARGET_DEVICES += allnet_all-sg8208m
 
