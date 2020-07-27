@@ -341,7 +341,6 @@ static ssize_t uimage_verify_allnet(u_char *buf, size_t len, int *extralen)
 {
 	struct uimage_header *header = (struct uimage_header *)buf;
 
-	printk("++++++++++++++++++++ uimage_verify_allnet");
 	switch (be32_to_cpu(header->ih_magic)) {
 	case FW_MAGIC_SG8208M:
 	case FW_MAGIC_SG8310PM:
@@ -361,7 +360,6 @@ mtdsplit_uimage_parse_allnet(struct mtd_info *master,
 			      const struct mtd_partition **pparts,
 			      struct mtd_part_parser_data *data)
 {
-	printk("++++++++++++++++++++ mtdsplit_uimage_parse_allnet");
 	return __mtdsplit_parse_uimage(master, pparts, data,
 				      uimage_verify_allnet);
 }

@@ -171,6 +171,7 @@ struct rtl838x_reg {
 	void (*vlan_set_tagged)(u32 vlan, u64 portmask, u32 conf);
 	void (*vlan_set_untagged)(u32 vlan, u64 portmask);
 	volatile void __iomem * (*mac_force_mode_ctrl)(int);
+	volatile void __iomem *rst_glb_ctrl;
 };
 
 struct rtl838x_switch_priv {
@@ -187,6 +188,7 @@ struct rtl838x_switch_priv {
 	struct mii_bus *mii_bus;
 	const struct rtl838x_reg *r;
 	u8 cpu_port;
+	u8 port_mask;
 };
 
 #endif /* _RTL838X_H */

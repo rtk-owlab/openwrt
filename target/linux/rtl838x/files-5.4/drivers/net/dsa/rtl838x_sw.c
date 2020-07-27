@@ -264,6 +264,7 @@ static const struct rtl838x_reg rtl838x_reg = {
 	.vlan_set_tagged = rtl838x_vlan_set_tagged,
 	.vlan_set_untagged = rtl838x_vlan_set_untagged,
 	.mac_force_mode_ctrl = rtl838x_mac_force_mode_ctrl,
+	.rst_glb_ctrl = RTL838X_RST_GLB_CTRL_0,
 };
 
 static const struct rtl838x_reg rtl839x_reg = {
@@ -291,6 +292,7 @@ static const struct rtl838x_reg rtl839x_reg = {
 	.vlan_set_tagged = rtl839x_vlan_set_tagged,
 	.vlan_set_untagged = rtl839x_vlan_set_untagged,
 	.mac_force_mode_ctrl = rtl839x_mac_force_mode_ctrl,
+	.rst_glb_ctrl = RTL839X_RST_GLB_CTRL,
 };
 
 static const struct rtl838x_mib_desc rtl838x_mib[] = {
@@ -1050,6 +1052,36 @@ static void rtl838x_write_hash(int idx, u32 *r)
 	do { }  while (sw_r32(RTL838X_TBL_ACCESS_L2_CTRL) & (1 << 16));
 }
 
+static void dump_fdb(struct rtl838x_switch_priv *priv)
+{
+	u32 r[3];
+	int i;
+	u8 mac[6];
+	u16 vid, rvid;
+
+	mutex_lock(&priv->reg_mutex);
+
+	for (i = 0; i < 8192; i++) {
+		read_l2_entry_using_hash(i >> 2, i & 0x3, r);
+		mac[0] = (r[1] >> 20);
+		mac[1] = (r[1] >> 12);
+		mac[2] = (r[1] >> 4);
+		mac[3] = (r[1] & 0xf) << 4 | (r[2] >> 28);
+		mac[4] = (r[2] >> 20);
+		mac[5] = (r[2] >> 12);
+		vid = r[0] & 0xfff;
+		rvid = r[2] & 0xfff;
+
+		if ( !(r[0] >> 17) ) /* Check for invalid entry */
+			continue;
+
+		printk("-> port %02d: %02x %02x %02x %02x %02x %02x, vid: %d, rvid: %d\n", 		(r[0] >> 12) & priv->port_mask,
+			mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], vid, rvid);
+	}
+
+	mutex_unlock(&priv->reg_mutex);
+}
+
 static int rtl838x_port_fdb_dump(struct dsa_switch *ds, int port,
 				 dsa_fdb_dump_cb_t *cb, void *data)
 {
@@ -1074,12 +1106,6 @@ static int rtl838x_port_fdb_dump(struct dsa_switch *ds, int port,
 
 		if ( !(r[0] >> 17) ) /* Check for invalid entry */
 			continue;
-
-		if (port == ((r[0] >> 12) & 0x1f)) {
-			printk("-> mac %02x %02x %02x %02x %02x %02x, vid: %d, rvid: %d\n",
-			       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], vid, rvid);
-			cb(mac, vid, (r[0] >> 19) & 1, data);
-		}
 	}
 
 	for (i = 0; i < 64; i++) {
@@ -1095,8 +1121,8 @@ static int rtl838x_port_fdb_dump(struct dsa_switch *ds, int port,
 		if ( !(r[0] >> 17) )
 			continue;
 
-		printk("Found in CAM: R1 %x R2 %x R3 %x\n", r[0], r[1], r[2]);
-		if (port == ((r[0] >> 12) & 0x1f))
+		pr_info("Found in CAM: R1 %x R2 %x R3 %x\n", r[0], r[1], r[2]);
+		if (port == ((r[0] >> 12) & priv->port_mask))
 			cb(mac, vid, (r[0] >> 19) & 1, data);
 	}
 
@@ -2048,19 +2074,46 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 	priv->id = soc_info.id;
 	if(soc_info.family == RTL8380_FAMILY_ID) {
 		priv->cpu_port = RTL838X_CPU_PORT;
+		priv->port_mask = 0x1f;
 		priv->r = &rtl838x_reg;
 		priv->ds->num_ports = 30;
 		rtl8380_get_version(priv);
 	} else {
 		priv->cpu_port = RTL839X_CPU_PORT;
+		priv->port_mask = 0x3f;
 		priv->r = &rtl839x_reg;
 		priv->ds->num_ports = 53;
 		rtl8390_get_version(priv);
 	}
 	printk("Chip version %c\n", priv->version);
+//	dump_fdb(priv);
 
 	err = rtl838x_mdio_probe(priv);
 	if (err) {
+		/* Probing fails the 1st time because of missing ethernet driver
+		 * initialization. Use this to block all ports and reset L2 SA cache */
+		/* Block all ports */
+		mutex_lock(&priv->reg_mutex);
+		for (i = 0; i < 4; i++)
+			sw_w32(0, priv->r->tbl_access_data_0(i));
+		if (priv->family_id == RTL8380_FAMILY_ID)
+			priv->r->exec_tbl0_cmd(1 << 15 | 2 << 12);
+		else
+			priv->r->exec_tbl0_cmd(1 << 16 | 1 << 15 | 5 << 12);
+		mutex_unlock(&priv->reg_mutex);
+
+		/* Flush L2 address cache */
+		if(soc_info.family == RTL8380_FAMILY_ID) {
+			for (i = 0; i <= priv->cpu_port; i++) {
+				sw_w32(1 << 26 | 1 << 23 | i << 5, priv->r->l2_tbl_flush_ctrl);
+				do { } while (sw_r32(priv->r->l2_tbl_flush_ctrl) & (1 << 26));
+			}
+		} else {
+			for (i = 0; i <= priv->cpu_port; i++) {
+				sw_w32(1 << 28 | 1 << 25 | i << 5, priv->r->l2_tbl_flush_ctrl);
+				do { } while (sw_r32(priv->r->l2_tbl_flush_ctrl) & (1 << 28));
+			}
+		}
 		return err;
 	}
 	err = dsa_register_switch(priv->ds);
@@ -2074,8 +2127,7 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 	/* ... for all ports */
 	priv->r->set_port_reg(0xffffffffffffffff, priv->r->isr_port_link_sts_chg);
 	priv->r->set_port_reg(0xffffffffffffffff, priv->r->imr_port_link_sts_chg);
-//	sw_w32(0xffffffff, RTL838X_ISR_PORT_LINK_STS_CHG);
-//	sw_w32(0xffffffff, RTL838X_IMR_PORT_LINK_STS_CHG);
+
 	/* Enable interrupts for switch */
 	sw_w32(0x1, priv->r->imr_glb);
 
@@ -2092,9 +2144,10 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 		/* Need to free allocated switch here */
 	}
 
-	printk("RESETTING L2 settings\n");
-	sw_w32_mask(0, 1 << 8, RTL838X_RST_GLB_CTRL_0);
 	rtl838x_get_l2aging(priv);
+/*
+	printk("FDB TABLE:\n");
+	dump_fdb(priv); */
 
 	/* Clear all destination ports for mirror groups */
 	for (i=0; i< 4; i++)
@@ -2102,7 +2155,6 @@ static int __init rtl838x_sw_probe(struct platform_device *pdev)
 
 	return err;
 }
-
 
 static int rtl838x_sw_remove(struct platform_device *pdev)
 {
