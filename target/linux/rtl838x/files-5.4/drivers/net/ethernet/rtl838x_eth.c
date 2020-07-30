@@ -95,6 +95,7 @@ static const struct rtl838x_reg rtl838x_reg = {
 	.get_mac_rx_pause_sts = rtl838x_get_mac_rx_pause_sts,
 	.get_mac_tx_pause_sts = rtl838x_get_mac_tx_pause_sts,
 	.mac = RTL838X_MAC,
+	.l2_tbl_flush_ctrl = RTL838X_L2_TBL_FLUSH_CTRL,
 };
 
 static const struct rtl838x_reg rtl839x_reg = {
@@ -115,6 +116,7 @@ static const struct rtl838x_reg rtl839x_reg = {
 	.get_mac_rx_pause_sts = rtl839x_get_mac_rx_pause_sts,
 	.get_mac_tx_pause_sts = rtl839x_get_mac_tx_pause_sts,
 	.mac = RTL839X_MAC,
+	.l2_tbl_flush_ctrl = RTL839X_L2_TBL_FLUSH_CTRL,
 };
 
 extern int rtl838x_phy_init(struct rtl838x_eth_priv *priv);
@@ -220,11 +222,6 @@ static void rtl838x_hw_reset(struct rtl838x_eth_priv *priv)
 		/* allow CRC errors on CPU-port */
 		sw_w32_mask(0, 0x8, priv->r->mac_port_ctrl(priv->cpu_port));
 	} else {
-		/* CPU port joins Lookup Miss Flooding Portmask */
-		sw_w32(0x28000, RTL839X_TBL_ACCESS_L2_CTRL);
-		sw_w32_mask(0, 0x80000000, RTL839X_TBL_ACCESS_L2_DATA(0));
-		sw_w32(0x38000, RTL839X_TBL_ACCESS_L2_CTRL);
-
 		/* Force CPU port link up */
 		sw_w32_mask(0, 3, priv->r->mac_force_mode_ctrl(priv->cpu_port));
 	}
@@ -248,6 +245,9 @@ static void rtl838x_hw_ring_setup(struct rtl838x_eth_priv *priv)
 
 static void rtl838x_hw_en_rxtx(struct rtl838x_eth_priv *priv)
 {
+	u32 v;
+
+	printk("rtl838x_hw_en_rxtx\n");
 	/* Disable Head of Line features for all RX rings */
 	sw_w32(0xffffffff, priv->r->dma_if_rx_ring_size(0));
 	
@@ -259,7 +259,19 @@ static void rtl838x_hw_en_rxtx(struct rtl838x_eth_priv *priv)
 
 	/* Enable traffic, engine expects empty FCS field */
 	sw_w32_mask(0, RX_EN | TX_EN, priv->r->dma_if_ctrl);
-	
+
+	/* Make sure to flood all traffic to CPU_PORT */
+	if (priv->family_id == RTL8390_FAMILY_ID) {
+		/* CPU port joins Lookup Miss Flooding Portmask */
+		/* Table access: CMD: read, table = 2 */
+		/* Sets MC_PMSK table port bit for port 52 to 1 */
+		sw_w32(0x28000, RTL839X_TBL_ACCESS_L2_CTRL);
+		do { } while (sw_r32(RTL839X_TBL_ACCESS_L2_CTRL) & (1 << 17));
+		v = sw_r32(RTL839X_TBL_ACCESS_L2_DATA(0));
+		sw_w32(v | 0x80000000, RTL839X_TBL_ACCESS_L2_DATA(0));
+		sw_w32(0x38000, RTL839X_TBL_ACCESS_L2_CTRL);
+		do { } while (sw_r32(RTL839X_TBL_ACCESS_L2_CTRL) & (1 << 17));
+	}
 }
 
 static void rtl838x_setup_ring_buffer(struct ring_b *ring)
@@ -323,6 +335,7 @@ static int rtl838x_eth_open(struct net_device *ndev)
 	netif_start_queue(ndev);
 
 	rtl838x_hw_en_rxtx(priv);
+
 	spin_unlock_irqrestore(&priv->lock, flags);
 	
 	return 0;
@@ -330,7 +343,29 @@ static int rtl838x_eth_open(struct net_device *ndev)
 
 static void rtl838x_hw_stop(struct rtl838x_eth_priv *priv)
 {
-	/* CPU-Port: Link down */
+	int i;
+
+	/* Block all ports */
+	if (priv->family_id == RTL8380_FAMILY_ID) {
+		sw_w32(0x03000000, RTL838X_TBL_ACCESS_DATA_0(0));
+		sw_w32(0x00000000, RTL838X_TBL_ACCESS_DATA_0(1));
+		sw_w32(1 << 15 | 2 << 12, RTL838X_TBL_ACCESS_CTRL_0);
+	}
+
+	/* Flush L2 address cache */
+	if(priv->family_id == RTL8380_FAMILY_ID) {
+		for (i = 0; i <= priv->cpu_port; i++) {
+			sw_w32(1 << 26 | 1 << 23 | i << 5, priv->r->l2_tbl_flush_ctrl);
+			do { } while (sw_r32(priv->r->l2_tbl_flush_ctrl) & (1 << 26));
+		}
+	} else {
+		for (i = 0; i <= priv->cpu_port; i++) {
+			sw_w32(1 << 28 | 1 << 25 | i << 5, priv->r->l2_tbl_flush_ctrl);
+			do { } while (sw_r32(priv->r->l2_tbl_flush_ctrl) & (1 << 28));
+		}
+	}
+
+	/* CPU-Port: Link down BUG: Works only for RTL838x */
 	sw_w32(0x6192D, priv->r->mac_force_mode_ctrl(priv->cpu_port));
 	mdelay(100);
 
@@ -530,7 +565,7 @@ static int rtl838x_hw_receive(struct net_device *dev, int r, int budget)
 	struct ring_b *ring = priv->membase;
 	struct sk_buff *skb;
 	unsigned long flags;
-	int i, j, len, work_done = 0;
+	int i, len, work_done = 0;
 	u8 *data, *skb_data;
 /*	static int num = 0; */
 	unsigned int val;

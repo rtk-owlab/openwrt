@@ -95,6 +95,9 @@
 #define RTL839X_MAC_GLB_CTRL			(RTL838X_SW_BASE + 0x02a8)
 #define RTL839X_SCHED_LB_TICK_TKN_CTRL		(RTL838X_SW_BASE + 0x60f8)
 
+#define RTL838X_L2_TBL_FLUSH_CTRL		(RTL838X_SW_BASE + 0x3370)
+#define RTL839X_L2_TBL_FLUSH_CTRL		(RTL838X_SW_BASE + 0x3ba0)
+
 /* MAC link state bits */
 #define FORCE_EN				(1 << 0)
 #define FORCE_LINK_EN				(1 << 1)
@@ -249,6 +252,7 @@ struct rtl838x_reg {
 	u32 (*get_mac_rx_pause_sts)(int);
 	u32 (*get_mac_tx_pause_sts)(int);
 	volatile void __iomem *mac;
+	volatile void __iomem *l2_tbl_flush_ctrl;
 };
 
 int rtl838x_write_phy(u32 port, u32 page, u32 reg, u32 val);
