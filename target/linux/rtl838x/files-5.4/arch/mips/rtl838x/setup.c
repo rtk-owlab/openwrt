@@ -40,10 +40,17 @@ u32 pll_reset_value;
 static void rtl838x_restart(char *command)
 {
 	u32 pll = rtl838x_r32(RTL838X_PLL_CML_CTRL);
+	 /* SoC reset vector (in flash memory): on RTL839x platform preferred way to reset */
+	void (*f)(void) = (void *) 0xbfc00000;
 
 	pr_info("System restart.\n");
-	if (soc_info.family == RTL8390_FAMILY_ID)
+	if (soc_info.family == RTL8390_FAMILY_ID) {
+		f();
+		/* If calling reset vector fails, reset entire chip */
 		rtl838x_w32(0xFFFFFFFF, RTL839X_RST_GLB_CTRL);
+		/* If this fails, halt the CPU */
+		while (1);
+	}
 
 	pr_info("PLL control register: %x, applying reset value %x\n",
 		pll, pll_reset_value);
