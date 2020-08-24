@@ -18,6 +18,7 @@
 #include "rtl838x.h"
 
 /* External RTL8218B and RTL8214FC IDs are identical */
+#define PHY_ID_RTL8214C		0x001cc941
 #define PHY_ID_RTL8214FC	0x001cc981
 #define PHY_ID_RTL8218B_E	0x001cc981
 #define PHY_ID_RTL8218B_I	0x001cca40
@@ -761,6 +762,29 @@ static	int rtl8380_rtl8218b_set_eee(struct phy_device *phydev,
 	return 0;
 }
 
+static int rtl8214c_match_phy_device(struct phy_device *phydev)
+{
+//	int addr = phydev->mdio.addr;
+	return phydev->phy_id == PHY_ID_RTL8214C;
+}
+
+static int rtl8380_configure_rtl8214c(struct phy_device *phydev)
+{
+	u32 phy_id, val;
+	int mac = phydev->mdio.addr;
+
+	read_phy(mac, 0, 2, &val);
+	phy_id = val << 16;
+	read_phy(mac, 0, 3, &val);
+	phy_id |= val;
+	pr_debug("Phy on MAC %d: %x\n", mac, phy_id);
+
+	phydev_info(phydev, "Detected external RTL8214C\n");
+
+	/* GPHY auto conf */
+	write_phy(mac, 0xa42, 29, 0);
+	return 0;
+}
 
 static int rtl8380_configure_rtl8214fc(struct phy_device *phydev)
 {
@@ -923,7 +947,6 @@ static int rtl8214fc_match_phy_device(struct phy_device *phydev)
 	return phydev->phy_id == PHY_ID_RTL8214FC && addr >= 24;
 }
 
-
 static int rtl8380_configure_serdes(struct phy_device *phydev)
 {
 	u32 v;
@@ -1082,6 +1105,26 @@ static int rtl8214fc_phy_probe(struct phy_device *phydev)
 	return 0;
 }
 
+static int rtl8214c_phy_probe(struct phy_device *phydev)
+{
+	struct device *dev = &phydev->mdio.dev;
+	struct rtl838x_phy_priv *priv;
+	int addr = phydev->mdio.addr;
+
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+
+	priv->name = "RTL8214C";
+
+	/* All base addresses of the PHYs start at multiples of 8 */
+	if(!(addr % 8)) {
+		/* Configuration must be done whil patching still possible */
+		return rtl8380_configure_rtl8214c(phydev);
+	}
+	return 0;
+}
+
 static int rtl8218b_ext_phy_probe(struct phy_device *phydev)
 {
 	struct device *dev = &phydev->mdio.dev;
@@ -1174,6 +1217,16 @@ static int rtl8390_serdes_probe(struct phy_device *phydev)
 }
 
 static struct phy_driver rtl838x_phy_driver[] = {
+	{
+		PHY_ID_MATCH_MODEL(PHY_ID_RTL8214FC),
+		.name		= "REATLTEK RTL8214C",
+		.features	= PHY_GBIT_FEATURES,
+		.match_phy_device = rtl8214c_match_phy_device,
+		.probe		= rtl8214c_phy_probe,
+		.suspend	= genphy_suspend,
+		.resume		= genphy_resume,
+		.set_loopback	= genphy_loopback,
+	},
 	{
 		PHY_ID_MATCH_MODEL(PHY_ID_RTL8214FC),
 		.name		= "REATLTEK RTL8214FC",
