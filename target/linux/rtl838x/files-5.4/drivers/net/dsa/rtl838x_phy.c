@@ -18,7 +18,7 @@
 #include "rtl838x.h"
 
 /* External RTL8218B and RTL8214FC IDs are identical */
-#define PHY_ID_RTL8214C		0x001cc941
+#define PHY_ID_RTL8214C		0x001cc942
 #define PHY_ID_RTL8214FC	0x001cc981
 #define PHY_ID_RTL8218B_E	0x001cc981
 #define PHY_ID_RTL8218B_I	0x001cca40
